@@ -104,10 +104,6 @@ function updateRuntimeConfigFromServer(data) {
   if (isFiniteNumber(data.uploadConcurrency)) {
     desiredUploadConcurrency = clampConfigNumber(data.uploadConcurrency, 1, 8)
   }
-  if (isFiniteNumber(data.transcriptionConcurrency)) {
-    const transcriptionConcurrency = clampConfigNumber(data.transcriptionConcurrency, 1, 8)
-    desiredUploadConcurrency = Math.min(desiredUploadConcurrency, transcriptionConcurrency)
-  }
   runtimeConfig.uploadConcurrency = desiredUploadConcurrency
 
   if (isFiniteNumber(data.statusHistoryLimit)) {
