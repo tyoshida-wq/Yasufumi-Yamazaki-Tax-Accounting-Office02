@@ -581,12 +581,10 @@ function handleStatusUpdate(status) {
   updateProgress(processedChunks, totalChunks, status.chunkSummary)
 
   const summary = status.chunkSummary || {}
-  const summaryDigest = JSON.stringify(summary)
-  if (summaryDigest !== state.lastChunkSummaryDigest) {
-    state.lastChunkSummaryDigest = summaryDigest
-    if ((summary.error ?? 0) > 0) {
-      logStatus('サーバー側で一部チャンクがエラー状態です。再処理ボタンから復旧してください。', 'error')
-    }
+  
+  // Check for errors
+  if ((summary.error ?? 0) > 0) {
+    logStatus('サーバー側で一部チャンクがエラー状態です。再処理ボタンから復旧してください。', 'error')
   }
 
   handleQueueStallDetection(summary)
