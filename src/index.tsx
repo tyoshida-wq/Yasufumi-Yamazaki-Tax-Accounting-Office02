@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
-const GEMINI_FLASH_MODEL = 'gemini-3-flash-preview'
-const GEMINI_PRO_MODEL = 'gemini-3-pro-preview'
+const GEMINI_FLASH_MODEL = 'gemini-3.0-flash-preview'
+const GEMINI_PRO_MODEL = 'gemini-3.0-pro-preview'
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com'
 
 const TIMESTAMP_PATTERN = /^\s*(\d{2}):(\d{2})(?::(\d{2}))?/ // Supports mm:ss or hh:mm:ss
@@ -657,6 +657,16 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
 })
 
 app.get('/api/healthz', (c) => c.json({ ok: true }))
+
+app.get('/api/test-api-key', (c) => {
+  const apiKey = c.env.GEMINI_API_KEY
+  return c.json({
+    hasKey: !!apiKey,
+    keyLength: apiKey?.length || 0,
+    keyPrefix: apiKey ? apiKey.substring(0, 10) + '...' : 'undefined',
+    keySuffix: apiKey ? '...' + apiKey.substring(apiKey.length - 4) : 'undefined'
+  })
+})
 
 app.get('/api/test-r2', async (c) => {
   try {
