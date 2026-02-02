@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ファイルアップロードテスト</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow p-6">
+        <h1 class="text-2xl font-bold mb-4">ファイルアップロードテスト</h1>
+        
+        <div class="mb-4">
+            <label for="test-file" class="block mb-2 font-medium">
+                音声ファイルを選択:
+            </label>
+            <input 
+                id="test-file" 
+                type="file" 
+                accept="audio/*" 
+                class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 p-2"
+            />
+        </div>
+        
+        <div id="result" class="mt-4 p-4 bg-gray-50 rounded-lg">
+            <p class="text-sm text-gray-600">ファイルを選択してください...</p>
+        </div>
+        
+        <div id="console-log" class="mt-4 p-4 bg-black text-green-400 rounded-lg font-mono text-xs">
+            <p>Console Log:</p>
+        </div>
+    </div>
+    
+    <script>
+        const fileInput = document.getElementById('test-file')
+        const result = document.getElementById('result')
+        const consoleLog = document.getElementById('console-log')
+        
+        function log(message) {
+            const p = document.createElement('p')
+            p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`
+            consoleLog.appendChild(p)
+            console.log(message)
+        }
+        
+        log('Script loaded')
+        log('File input element: ' + (fileInput ? 'Found' : 'NOT FOUND'))
+        
+        fileInput.addEventListener('change', (event) => {
+            log('Change event triggered')
+            const file = event.target.files?.[0]
+            
+            if (file) {
+                log('File selected: ' + file.name)
+                result.innerHTML = `
+                    <p class="font-bold text-green-600 mb-2">✓ ファイルが選択されました</p>
+                    <p><strong>ファイル名:</strong> ${file.name}</p>
+                    <p><strong>サイズ:</strong> ${(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p><strong>形式:</strong> ${file.type || '不明'}</p>
+                `
+            } else {
+                log('No file selected')
+                result.innerHTML = '<p class="text-red-600">ファイルが選択されていません</p>'
+            }
+        })
+        
+        log('Event listener registered')
+    </script>
+</body>
+</html>

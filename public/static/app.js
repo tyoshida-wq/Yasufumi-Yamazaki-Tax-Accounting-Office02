@@ -389,10 +389,6 @@ async function processAudioFile(file) {
     await fetchTaskLogs(state.taskId)
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
 
-    // Use strict sequential batching to enforce concurrency limit
-    const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
-    logStatus(`並列アップロード数: ${uploadConcurrency} (最大2に制限)`)
-    
     // Upload all chunks as fast as possible (server will throttle processing)
     const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
     logStatus(`並列アップロード数: ${uploadConcurrency} (サーバー側で処理速度制御)`)
