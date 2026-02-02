@@ -1313,17 +1313,88 @@ async function loadTaskHistory() {
     const historyHTML = tasks.map(task => createTaskHistoryItem(task)).join('')
     elements.taskHistoryContainer.innerHTML = historyHTML
     
-    // Add click event listeners to each task item
+    // Add click event listeners to each task item and delete buttons
     tasks.forEach(task => {
       const element = document.getElementById(`task-${task.id}`)
       if (element) {
-        element.addEventListener('click', () => loadTaskDetails(task.id))
+        element.addEventListener('click', (e) => {
+          // Don't trigger if clicking the delete button
+          if (!e.target.closest('.delete-task-btn')) {
+            loadTaskDetails(task.id)
+          }
+        })
+      }
+      
+      // Add delete button event listener
+      const deleteBtn = document.getElementById(`delete-task-${task.id}`)
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          handleDeleteTask(task.id, task.filename || 'このタスク')
+        })
       }
     })
   } catch (error) {
     console.error('Failed to load task history:', error)
     elements.taskHistoryContainer.innerHTML = '<div class="text-center text-sm text-red-500 py-8">履歴の読み込みに失敗しました</div>'
   }
+}
+
+async function handleDeleteTask(taskId, filename) {
+  if (!confirm(`「${filename}」を削除してもよろしいですか？\n\nこの操作は取り消せません。`)) {
+    return
+  }
+  
+  try {
+    const response = await fetch(`/api/tasks/${taskId}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || 'Failed to delete task')
+    }
+    
+    const data = await response.json()
+    console.log('Task deleted:', data)
+    
+    // Remove from UI
+    const taskElement = document.getElementById(`task-${taskId}`)
+    if (taskElement) {
+      taskElement.style.opacity = '0'
+      taskElement.style.transform = 'scale(0.95)'
+      setTimeout(() => {
+        taskElement.remove()
+        
+        // Check if there are any tasks left
+        if (elements.taskHistoryContainer && elements.taskHistoryContainer.children.length === 0) {
+          elements.taskHistoryContainer.innerHTML = '<div class="text-center text-sm text-slate-500 py-8">タスク履歴がありません</div>'
+        }
+      }, 300)
+    }
+    
+    // If the deleted task is the current task, reset UI
+    if (state.taskId === taskId) {
+      resetUIToInitialState()
+    }
+    
+    logStatus(`タスク「${filename}」を削除しました`)
+  } catch (error) {
+    console.error('Failed to delete task:', error)
+    alert(`タスクの削除に失敗しました: ${error.message}`)
+  }
+}
+
+function resetUIToInitialState() {
+  state.taskId = null
+  state.transcript = ''
+  state.minutes = ''
+  elements.progressSummary.textContent = 'チャンク送信待ち'
+  elements.progressBar.style.width = '0%'
+  elements.transcriptOutput.textContent = 'まだ文字起こしは完了していません。'
+  elements.minutesOutput.textContent = '議事録生成は未実行です。'
+  elements.serverLog.textContent = SERVER_LOG_EMPTY_TEXT
+  toggleResultButtons(false)
 }
 
 function createTaskHistoryItem(task) {
@@ -1346,9 +1417,15 @@ function createTaskHistoryItem(task) {
             ${duration !== '不明' ? `<div>音声長: ${duration}</div>` : ''}
           </div>
         </div>
-        <div class="text-right">
+        <div class="flex flex-col items-end gap-2">
           <button class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
             詳細を表示 →
+          </button>
+          <button id="delete-task-${task.id}" class="delete-task-btn text-red-600 hover:text-red-800 text-xs font-medium flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            削除
           </button>
         </div>
       </div>

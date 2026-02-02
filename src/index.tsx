@@ -704,6 +704,39 @@ app.get('/api/test-r2', async (c) => {
   }
 })
 
+app.delete('/api/tasks/:taskId', async (c) => {
+  const taskId = c.req.param('taskId')
+  
+  try {
+    // Check if task exists
+    const task = await getTask(c.env, taskId)
+    if (!task) {
+      return c.json({ error: 'Task not found' }, 404)
+    }
+    
+    // Delete from all tables (CASCADE will handle related records)
+    await c.env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(taskId).run()
+    
+    await appendTaskLog(c.env, taskId, {
+      level: 'info',
+      message: 'Task deleted by user'
+    }).catch(() => {}) // Ignore error if task_logs was already deleted
+    
+    return c.json({ 
+      success: true,
+      message: 'Task deleted successfully',
+      taskId 
+    })
+  } catch (error) {
+    console.error('Failed to delete task:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ 
+      error: 'Failed to delete task',
+      details: errorMessage
+    }, 500)
+  }
+})
+
 app.get('/api/tasks', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
   
