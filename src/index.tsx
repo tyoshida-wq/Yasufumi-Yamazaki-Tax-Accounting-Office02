@@ -233,6 +233,8 @@ app.post('/api/tasks/:taskId/process', async (c) => {
 
   const reasonParam = c.req.query('reason')
   const reason = reasonParam && reasonParam.length > 0 ? reasonParam : 'manual'
+  const thresholdParam = c.req.query('threshold')
+  const thresholdTable = thresholdParam ? Number(thresholdParam) : NaN
 
   const result = await processChunkQueue(c.env, taskId)
   const summary = result.summary ?? {
@@ -253,7 +255,8 @@ app.post('/api/tasks/:taskId/process', async (c) => {
       queued: summary.queued,
       processing: summary.processing,
       completed: summary.completed,
-      error: summary.error
+      error: summary.error,
+      threshold: Number.isNaN(thresholdTable) ? undefined : thresholdTable
     }
   })
 

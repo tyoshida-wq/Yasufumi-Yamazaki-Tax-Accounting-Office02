@@ -17,7 +17,7 @@ const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 const STATUS_POLL_INTERVAL_MS = 6000
 const MERGE_READY_TIMEOUT_MS = 120_000
 const MERGE_RETRY_DELAY_MS = 6000
-const AUTO_REPROCESS_THRESHOLD = 3
+const AUTO_REPROCESS_THRESHOLD = 10
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -730,7 +730,7 @@ async function autoTriggerReprocess() {
   state.autoReprocessInProgress = true
   state.queueStalledCount = 0
   try {
-    const response = await fetch(`/api/tasks/${state.taskId}/process?reason=auto`, { method: 'POST' })
+    const response = await fetch(`/api/tasks/${state.taskId}/process?reason=auto&threshold=${AUTO_REPROCESS_THRESHOLD}`, { method: 'POST' })
     const data = await response.json().catch(() => ({}))
     logResponse(data)
     if (!response.ok) {
