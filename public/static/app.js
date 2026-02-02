@@ -17,7 +17,7 @@ const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 const STATUS_POLL_INTERVAL_MS = 6000
 const MERGE_READY_TIMEOUT_MS = 120_000
 const MERGE_RETRY_DELAY_MS = 6000
-const AUTO_REPROCESS_THRESHOLD = 10
+const AUTO_REPROCESS_THRESHOLD = 20  // 20 checks × 6s = 120s (2 minutes)
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -605,20 +605,36 @@ function handleQueueStallDetection(summary) {
     state.queueStalledCount = 0
     return
   }
+  
   const queued = summary.queued ?? 0
   const processing = summary.processing ?? 0
+  const completed = summary.completed ?? 0
+  
+  // Create digest to detect progress
+  const currentDigest = `${completed}-${processing}-${queued}`
+  
+  // Only count as stalled if no progress was made
   if (queued > 0 || processing > 0) {
-    state.queueStalledCount += 1
-    if (
-      state.waitingForMerge &&
-      !state.autoReprocessInProgress &&
-      state.queueStalledCount >= AUTO_REPROCESS_THRESHOLD
-    ) {
-      logStatus('チャンク処理の停滞を検知したため、自動的に再処理を試行します。', 'warn')
-      void autoTriggerReprocess()
+    if (currentDigest === state.lastChunkSummaryDigest) {
+      // No progress since last check
+      state.queueStalledCount += 1
+      
+      if (
+        state.waitingForMerge &&
+        !state.autoReprocessInProgress &&
+        state.queueStalledCount >= AUTO_REPROCESS_THRESHOLD
+      ) {
+        logStatus('チャンク処理の停滞を検知したため、自動的に再処理を試行します。', 'warn')
+        void autoTriggerReprocess()
+      }
+    } else {
+      // Progress detected, reset counter
+      state.queueStalledCount = 0
+      state.lastChunkSummaryDigest = currentDigest
     }
   } else {
     state.queueStalledCount = 0
+    state.lastChunkSummaryDigest = ''
   }
 }
 
