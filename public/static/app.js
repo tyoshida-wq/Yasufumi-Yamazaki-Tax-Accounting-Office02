@@ -1273,7 +1273,7 @@ async function loadTaskHistory() {
 function createTaskHistoryItem(task) {
   const statusBadge = getTaskStatusBadge(task.status)
   const createdDate = new Date(task.createdAt).toLocaleString('ja-JP')
-  const duration = task.durationMs ? formatDuration(task.durationMs) : '不明'
+  const duration = task.durationMs ? formatDurationJa(task.durationMs) : '不明'
   
   return `
     <div id="task-${task.id}" class="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition hover:border-indigo-300 hover:shadow-md">
@@ -1312,7 +1312,7 @@ function getTaskStatusBadge(status) {
   return badges[status] || badges.initialized
 }
 
-function formatDuration(ms) {
+function formatDurationJa(ms) {
   const totalSeconds = Math.floor(ms / 1000)
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
