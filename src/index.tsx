@@ -327,8 +327,42 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  if (task.processedChunks < task.totalChunks) {
-    return c.json({ error: 'Transcription is not complete yet' }, 409)
+  const summary = await getChunkSummary(c.env, taskId)
+  const totalChunks = task.totalChunks
+  const pendingChunks = (summary.processing ?? 0) + (summary.queued ?? 0)
+  const completedChunks = summary.completed ?? 0
+  const summaryTotal = summary.total ?? 0
+
+  if ((summary.error ?? 0) > 0) {
+    await appendTaskLog(c.env, taskId, {
+      level: 'warn',
+      message: 'Transcript merge blocked: chunk errors remain',
+      context: {
+        summary
+      }
+    })
+    return c.json({
+      error: 'One or more chunks failed transcription. Please retry the affected chunks.',
+      chunkSummary: summary
+    }, 409)
+  }
+
+  if (totalChunks === 0) {
+    return c.json({ error: 'No chunks available for merging' }, 400)
+  }
+
+  if (pendingChunks > 0 || completedChunks < totalChunks || summaryTotal < totalChunks) {
+    await appendTaskLog(c.env, taskId, {
+      level: 'info',
+      message: 'Transcript merge deferred: chunks still pending',
+      context: {
+        summary
+      }
+    })
+    return c.json({
+      error: 'Transcription is not complete yet',
+      chunkSummary: summary
+    }, 409)
   }
 
   await appendTaskLog(c.env, taskId, {
@@ -343,7 +377,27 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
   for (let i = 0; i < task.totalChunks; i++) {
     const record = await getChunk(c.env, taskId, i)
     if (!record) {
-      return c.json({ error: `Missing chunk ${i}` }, 500)
+      const existingState = (await c.env.TASKS_KV.get(chunkStateKey(taskId, i), { type: 'json' })) as ChunkStateRecord | null
+      await saveChunkState(c.env, taskId, {
+        index: i,
+        status: 'error',
+        attempts: existingState?.attempts ?? 0,
+        updatedAt: new Date().toISOString(),
+        lastError: 'Chunk missing before merge'
+      })
+      await appendTaskLog(c.env, taskId, {
+        level: 'error',
+        message: 'Transcript merge failed: chunk missing',
+        context: {
+          chunkIndex: i
+        }
+      })
+      const updatedSummary = await getChunkSummary(c.env, taskId)
+      return c.json({
+        error: `Missing chunk ${i}. Please reprocess this chunk.`,
+        chunkIndex: i,
+        chunkSummary: updatedSummary
+      }, 409)
     }
     chunkRecords.push(record)
   }
@@ -353,6 +407,7 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
 
   const updatedTask: TaskRecord = {
     ...task,
+    processedChunks: totalChunks,
     status: 'transcribed',
     updatedAt: new Date().toISOString()
   }
@@ -605,7 +660,7 @@ async function processChunkQueue(env: Bindings, taskId: string, options: Process
     )
 
     processed += results.reduce((sum, value) => sum + value, 0)
-    if (jobs.length < TRANSCRIPTION_MAX_CONCURRENCY) {
+    if (jobs.length < concurrency) {
       break
     }
   }

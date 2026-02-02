@@ -109,6 +109,10 @@
               <pre id="server-log" class="log-panel">サーバーログはまだありません。</pre>
             </div>
           </div>
+          <div class="mt-4 flex flex-wrap gap-3 text-sm" id="queue-actions">
+            <button id="trigger-reprocess" class="btn-secondary hidden">未処理チャンクを再処理</button>
+            <button id="retry-merge" class="btn-muted hidden">結合を再試行</button>
+          </div>
         </div>
       </section>
 

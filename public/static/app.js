@@ -14,6 +14,9 @@ const runtimeConfig = {
 
 const MAX_DURATION_MS = 3 * 60 * 60 * 1000 // 3 hours
 const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
+const STATUS_POLL_INTERVAL_MS = 6000
+const MERGE_READY_TIMEOUT_MS = 120_000
+const MERGE_RETRY_DELAY_MS = 6000
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -35,7 +38,9 @@ const elements = {
   transcriptOutput: document.getElementById('transcript-output'),
   minutesOutput: document.getElementById('minutes-output'),
   copyTranscript: document.getElementById('copy-transcript'),
-  copyMinutes: document.getElementById('copy-minutes')
+  copyMinutes: document.getElementById('copy-minutes'),
+  triggerReprocess: document.getElementById('trigger-reprocess'),
+  retryMerge: document.getElementById('retry-merge')
 }
 
 const state = {
@@ -51,7 +56,12 @@ const state = {
   totalChunks: 0,
   transcript: '',
   minutes: '',
-  statusHistory: []
+  statusHistory: [],
+  statusPollTimerId: null,
+  latestStatus: null,
+  waitingForMerge: false,
+  lastTaskErrorMessage: null,
+  lastChunkSummaryDigest: ''
 }
 
 async function loadRuntimeConfig() {
@@ -170,6 +180,18 @@ elements.copyMinutes.addEventListener('click', async () => {
   flashCopied(elements.copyMinutes)
 })
 
+if (elements.triggerReprocess) {
+  elements.triggerReprocess.addEventListener('click', async () => {
+    await handleTriggerReprocess()
+  })
+}
+
+if (elements.retryMerge) {
+  elements.retryMerge.addEventListener('click', async () => {
+    await handleRetryMerge()
+  })
+}
+
 elements.recordStart.addEventListener('click', startRecording)
 elements.recordStop.addEventListener('click', stopRecording)
 
@@ -284,9 +306,16 @@ async function processAudioFile(file) {
   state.statusHistory = []
   state.transcript = ''
   state.minutes = ''
+  state.waitingForMerge = false
+  state.lastTaskErrorMessage = null
+  state.lastChunkSummaryDigest = ''
   updateResultPanels()
   toggleResultButtons(false)
   elements.startProcessing.disabled = true
+  stopStatusPolling()
+  resetQueueActions()
+  state.taskId = null
+  state.latestStatus = null
   logStatus('音声メタデータを読み込み中...')
 
   try {
@@ -310,7 +339,9 @@ async function processAudioFile(file) {
     })
 
     state.taskId = task.id
+    state.latestStatus = null
     logStatus(`タスク ${state.taskId} を作成しました。`)
+    startStatusPolling(state.taskId)
     await fetchTaskLogs(state.taskId)
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
 
@@ -328,23 +359,31 @@ async function processAudioFile(file) {
         await uploadChunk(state.taskId, chunk)
         const status = await fetchTaskStatus(state.taskId)
         if (status && status.task) {
-          updateProgress(status.task.processedChunks, status.task.totalChunks, status.chunkSummary)
+          handleStatusUpdate(status)
         }
       }
     }
 
     await Promise.all(Array.from({ length: uploadWorkers }, () => runUploadWorker()))
 
-    logStatus('全チャンクの送信が完了しました。サーバーで結合します。')
+    logStatus('全チャンクの送信が完了しました。サーバーで結合準備を確認します。')
+    await fetchTaskLogs(state.taskId)
+
+    state.waitingForMerge = true
+    const readinessStatus = await waitForReadyForMerge(state.taskId)
+    if (readinessStatus) {
+      handleStatusUpdate(readinessStatus)
+    }
+
     const merged = await mergeTranscript(state.taskId)
     await fetchTaskLogs(state.taskId)
 
-    state.transcript = merged.transcript
-    updateResultPanels()
-    toggleTranscriptButtons(true)
-
+    applyMergedTranscript(merged)
+    const postMergeStatus = await fetchTaskStatus(state.taskId)
+    if (postMergeStatus) {
+      handleStatusUpdate(postMergeStatus)
+    }
     logStatus('全文文字起こしが完了しました。議事録生成ボタンからステップ2を実行できます。')
-    elements.generateMinutes.disabled = false
   } catch (error) {
     console.error(error)
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました'
@@ -454,15 +493,275 @@ async function fetchTaskStatus(taskId) {
   return data
 }
 
+function startStatusPolling(taskId) {
+  if (!taskId) return
+  stopStatusPolling()
+  state.statusPollTimerId = window.setInterval(async () => {
+    try {
+      const status = await fetchTaskStatus(taskId)
+      if (status) {
+        handleStatusUpdate(status)
+      }
+    } catch (error) {
+      console.warn('Status poll failed', error)
+    }
+  }, STATUS_POLL_INTERVAL_MS)
+
+  fetchTaskStatus(taskId)
+    .then((status) => {
+      if (status) {
+        handleStatusUpdate(status)
+      }
+    })
+    .catch((error) => {
+      console.warn('Initial status poll failed', error)
+    })
+}
+
+function stopStatusPolling() {
+  if (state.statusPollTimerId) {
+    clearInterval(state.statusPollTimerId)
+    state.statusPollTimerId = null
+  }
+}
+
+function handleStatusUpdate(status) {
+  if (!status || typeof status !== 'object' || !status.task) return
+
+  state.latestStatus = status
+  const totalChunks = status.task.totalChunks ?? state.totalChunks ?? 0
+  const processedChunks = status.task.processedChunks ?? 0
+  updateProgress(processedChunks, totalChunks, status.chunkSummary)
+
+  const summary = status.chunkSummary || {}
+  const summaryDigest = JSON.stringify(summary)
+  if (summaryDigest !== state.lastChunkSummaryDigest) {
+    state.lastChunkSummaryDigest = summaryDigest
+    if ((summary.error ?? 0) > 0) {
+      logStatus('サーバー側で一部チャンクがエラー状態です。再処理ボタンから復旧してください。', 'error')
+    }
+  }
+
+  if (status.task.status === 'error' && status.task.error && state.lastTaskErrorMessage !== status.task.error) {
+    state.lastTaskErrorMessage = status.task.error
+    logStatus(`サーバー側でエラー: ${status.task.error}`, 'error')
+  }
+
+  updateQueueActionVisibility(status)
+}
+
+function updateQueueActionVisibility(status) {
+  if (!status || typeof status !== 'object') return
+  const summary = status.chunkSummary || {}
+  const task = status.task
+  const showReprocess = shouldShowReprocess(summary, task)
+  const showRetryMerge = shouldShowRetryMerge(summary, task, Boolean(status.hasMergedTranscript))
+
+  if (elements.triggerReprocess) {
+    setElementVisibility(elements.triggerReprocess, showReprocess)
+    if (!showReprocess) {
+      elements.triggerReprocess.disabled = false
+    }
+  }
+
+  if (elements.retryMerge) {
+    setElementVisibility(elements.retryMerge, showRetryMerge)
+    if (!showRetryMerge) {
+      elements.retryMerge.disabled = false
+    }
+  }
+}
+
+function shouldShowReprocess(summary, task) {
+  if (!summary || typeof summary !== 'object') return false
+  const totalChunks = task?.totalChunks ?? state.totalChunks ?? 0
+  if ((summary.error ?? 0) > 0) {
+    return true
+  }
+  if (state.isProcessing && (summary.error ?? 0) === 0) {
+    return false
+  }
+  if (totalChunks > 0 && (summary.total ?? 0) < totalChunks && !state.waitingForMerge) {
+    return true
+  }
+  if (task?.status === 'error') {
+    return true
+  }
+  return false
+}
+
+function shouldShowRetryMerge(summary, task, hasMergedTranscript) {
+  if (!summary || typeof summary !== 'object' || !task) return false
+  if (hasMergedTranscript) return false
+  if ((summary.error ?? 0) > 0) return false
+  const totalChunks = task.totalChunks ?? state.totalChunks ?? 0
+  if (!totalChunks) return false
+  const pending = (summary.processing ?? 0) + (summary.queued ?? 0)
+  if (pending > 0) return false
+  if ((summary.completed ?? 0) < totalChunks) return false
+  if ((summary.total ?? 0) < totalChunks) return false
+  if (task.status === 'completed') return false
+  return true
+}
+
+function setElementVisibility(element, visible) {
+  if (!element) return
+  element.classList.toggle('hidden', !visible)
+}
+
+function resetQueueActions() {
+  if (elements.triggerReprocess) {
+    elements.triggerReprocess.disabled = false
+    setElementVisibility(elements.triggerReprocess, false)
+  }
+  if (elements.retryMerge) {
+    elements.retryMerge.disabled = false
+    setElementVisibility(elements.retryMerge, false)
+  }
+}
+
+async function waitForReadyForMerge(taskId, timeoutMs = MERGE_READY_TIMEOUT_MS) {
+  const startTime = Date.now()
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const status = await fetchTaskStatus(taskId)
+      if (status) {
+        handleStatusUpdate(status)
+        const summary = status.chunkSummary || {}
+        const totalChunks = status.task?.totalChunks ?? state.totalChunks ?? 0
+        const pending = (summary.processing ?? 0) + (summary.queued ?? 0)
+        if ((summary.error ?? 0) > 0) {
+          throw new Error('チャンク処理でエラーが発生しています。再処理ボタンから復旧してください。')
+        }
+        if (
+          totalChunks > 0 &&
+          (summary.completed ?? 0) >= totalChunks &&
+          pending === 0 &&
+          (summary.total ?? 0) >= totalChunks
+        ) {
+          return status
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('ステータスの取得に失敗しました')) {
+          // wait and retry
+        } else {
+          throw error
+        }
+      } else {
+        throw error
+      }
+    }
+    await sleep(MERGE_RETRY_DELAY_MS)
+  }
+  throw new Error('チャンク処理が所定時間内に完了しませんでした。サーバーログをご確認ください。')
+}
+
+async function handleTriggerReprocess() {
+  if (!state.taskId) return
+  if (elements.triggerReprocess) {
+    elements.triggerReprocess.disabled = true
+  }
+  logStatus('未処理チャンクの再処理をリクエストしています...')
+  try {
+    const response = await fetch(`/api/tasks/${state.taskId}/process`, { method: 'POST' })
+    const data = await response.json().catch(() => ({}))
+    logResponse(data)
+    if (!response.ok) {
+      throw new Error(data?.error || '再処理のリクエストに失敗しました')
+    }
+    logStatus('再処理をトリガーしました。サーバーの処理完了を待機します。')
+    await fetchTaskLogs(state.taskId)
+    try {
+      const status = await fetchTaskStatus(state.taskId)
+      if (status) {
+        handleStatusUpdate(status)
+      }
+    } catch (statusError) {
+      console.warn('Failed to refresh status after reprocess', statusError)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '再処理のリクエストに失敗しました'
+    logStatus(message, 'error')
+  } finally {
+    if (elements.triggerReprocess) {
+      elements.triggerReprocess.disabled = false
+    }
+  }
+}
+
+async function handleRetryMerge() {
+  if (!state.taskId) return
+  if (elements.retryMerge) {
+    elements.retryMerge.disabled = true
+  }
+  logStatus('結合を再試行しています...')
+  try {
+    state.waitingForMerge = true
+    const readinessStatus = await waitForReadyForMerge(state.taskId)
+    if (readinessStatus) {
+      handleStatusUpdate(readinessStatus)
+    }
+    const merged = await mergeTranscript(state.taskId)
+    await fetchTaskLogs(state.taskId)
+    applyMergedTranscript(merged)
+    logStatus('結合を再試行し、全文を取得しました。')
+    try {
+      const status = await fetchTaskStatus(state.taskId)
+      if (status) {
+        handleStatusUpdate(status)
+      }
+    } catch (statusError) {
+      console.warn('Failed to refresh status after retry merge', statusError)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '結合の再試行に失敗しました'
+    logStatus(message, 'error')
+  } finally {
+    state.waitingForMerge = false
+    if (elements.retryMerge) {
+      elements.retryMerge.disabled = false
+    }
+  }
+}
+
+function applyMergedTranscript(result) {
+  state.waitingForMerge = false
+  if (!result || typeof result !== 'object') {
+    resetQueueActions()
+    return
+  }
+  state.transcript = result.transcript || ''
+  updateResultPanels()
+  toggleTranscriptButtons(Boolean(state.transcript))
+  elements.generateMinutes.disabled = false
+  resetQueueActions()
+}
+
 async function mergeTranscript(taskId) {
   const response = await fetch(`/api/tasks/${taskId}/merge`, { method: 'POST' })
-  const data = await response.json()
+  const data = await response.json().catch(() => ({}))
   logResponse(data)
+
   if (!response.ok) {
+    if (response.status === 409) {
+      const message = data?.error || 'チャンク処理が完了していないため、結合できません。'
+      logStatus(message, 'error')
+      if (data?.chunkSummary && state.latestStatus) {
+        state.latestStatus = {
+          ...state.latestStatus,
+          chunkSummary: data.chunkSummary
+        }
+        handleStatusUpdate(state.latestStatus)
+      }
+      throw new Error(message)
+    }
     throw new Error(data?.error || '文字起こし結合に失敗しました')
   }
+
   elements.progressSummary.textContent = `結合完了: ${state.totalChunks} / ${state.totalChunks}`
-  updateProgress(state.totalChunks, state.totalChunks)
+  updateProgress(state.totalChunks, state.totalChunks, state.latestStatus?.chunkSummary)
   return data
 }
 
@@ -649,6 +948,10 @@ function truncate(value, max = 160) {
     value = String(value ?? '')
   }
   return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function downloadText(content, filename) {
