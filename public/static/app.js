@@ -1,7 +1,7 @@
 const defaultConfig = Object.freeze({
   chunkSizeBytes: 1 * 1024 * 1024,
   overlapSeconds: 5,
-  uploadConcurrency: 3,
+  uploadConcurrency: 2, // CRITICAL: Force max 2 concurrent uploads to prevent server overload
   statusHistoryLimit: 120
 })
 
@@ -389,26 +389,26 @@ async function processAudioFile(file) {
     await fetchTaskLogs(state.taskId)
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
 
-    let nextChunkIndex = 0
-    const uploadConcurrency = Math.max(1, getConfig().uploadConcurrency || 1)
-    const uploadWorkers = Math.max(1, Math.min(uploadConcurrency, plan.chunks.length))
-
-    const runUploadWorker = async () => {
-      while (true) {
-        const currentIndex = nextChunkIndex++
-        if (currentIndex >= plan.chunks.length) {
-          break
-        }
-        const chunk = plan.chunks[currentIndex]
+    // Use strict sequential batching to enforce concurrency limit
+    const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
+    logStatus(`並列アップロード数: ${uploadConcurrency} (最大2に制限)`)
+    
+    // Process chunks in strict batches
+    for (let i = 0; i < plan.chunks.length; i += uploadConcurrency) {
+      const batch = plan.chunks.slice(i, i + uploadConcurrency)
+      logStatus(`バッチ ${Math.floor(i / uploadConcurrency) + 1}: ${batch.length}チャンクを送信中...`)
+      
+      // Upload batch in parallel (but limited to uploadConcurrency)
+      await Promise.all(batch.map(async (chunk) => {
         await uploadChunk(state.taskId, chunk)
         const status = await fetchTaskStatus(state.taskId)
         if (status && status.task) {
           handleStatusUpdate(status)
         }
-      }
+      }))
+      
+      logStatus(`バッチ ${Math.floor(i / uploadConcurrency) + 1} 完了: ${Math.min(i + uploadConcurrency, plan.chunks.length)}/${plan.chunks.length} チャンク送信済み`)
     }
-
-    await Promise.all(Array.from({ length: uploadWorkers }, () => runUploadWorker()))
 
     logStatus('全チャンクの送信が完了しました。サーバーで結合準備を確認します。')
     await fetchTaskLogs(state.taskId)
@@ -1035,7 +1035,7 @@ function formatBytes(bytes) {
 
 function getChunkInfoText() {
   const config = getConfig()
-  return `${formatBytes(config.chunkSizeBytes)} / チャンク、重複 ${config.overlapSeconds}秒`
+  return `${formatBytes(config.chunkSizeBytes)} / チャンク、重複 ${config.overlapSeconds}秒、並列 ${config.uploadConcurrency}個`
 }
 
 function truncate(value, max = 160) {
