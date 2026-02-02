@@ -541,9 +541,12 @@ async function fetchTaskStatus(taskId) {
 }
 
 function startStatusPolling(taskId) {
+  console.log('[startStatusPolling] Starting for taskId:', taskId)
+  
   if (!taskId) return
   stopStatusPolling()
   state.statusPollTimerId = window.setInterval(async () => {
+    console.log('[startStatusPolling] Polling status at', new Date().toLocaleTimeString())
     try {
       const status = await fetchTaskStatus(taskId)
       if (status) {
@@ -554,6 +557,7 @@ function startStatusPolling(taskId) {
     }
   }, STATUS_POLL_INTERVAL_MS)
 
+  console.log('[startStatusPolling] Initial status fetch')
   fetchTaskStatus(taskId)
     .then((status) => {
       if (status) {
@@ -573,7 +577,12 @@ function stopStatusPolling() {
 }
 
 function handleStatusUpdate(status) {
-  if (!status || typeof status !== 'object' || !status.task) return
+  console.log('[handleStatusUpdate] Called with status:', status)
+  
+  if (!status || typeof status !== 'object' || !status.task) {
+    console.log('[handleStatusUpdate] Invalid status, returning early')
+    return
+  }
 
   state.latestStatus = status
   const totalChunks = status.task.totalChunks ?? state.totalChunks ?? 0
@@ -581,6 +590,7 @@ function handleStatusUpdate(status) {
   updateProgress(processedChunks, totalChunks, status.chunkSummary)
 
   const summary = status.chunkSummary || {}
+  console.log('[handleStatusUpdate] chunkSummary:', summary)
   
   // Check for errors
   if ((summary.error ?? 0) > 0) {
