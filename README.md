@@ -32,8 +32,24 @@ Cloudflare Pages + Workers (Hono)
   ├─ /api/tasks/:id/merge      … タイムスタンプ結合
   ├─ /api/tasks/:id/minutes    … 議事録生成 (Gemini Pro)
   ├─ /api/tasks/:id/status     … 進捗確認
-  └─ Cloudflare KV (TASKS_KV)  … タスク/チャンク/全文/議事録保存
+  └─ Cloudflare D1 (webapp-production)  … タスク/チャンク/全文/議事録をSQLiteデータベースに保存
 ```
+
+## データベース設計（D1）
+**テーブル構成:**
+- `tasks` - タスク本体（ID、ファイル名、ステータス、チャンク数など）
+- `chunks` - 文字起こし結果（タスクID、チャンクインデックス、テキスト）
+- `chunk_jobs` - 処理キュー（音声データ、ステータス、リトライ情報）
+- `chunk_states` - 処理状態追跡
+- `transcripts` - 結合済み全文
+- `minutes` - 生成済み議事録
+- `task_logs` - タスク処理ログ
+
+**メリット:**
+- SQLクエリによる高速検索
+- リレーショナルデータの整合性
+- 複雑なフィルタリング・ソート
+- データエクスポートの容易さ
 
 ## API エンドポイント一覧
 | メソッド | パス | 用途 |
@@ -85,13 +101,14 @@ Cloudflare Pages + Workers (Hono)
 - Node.js 18 以上、npm 10 以上。
 - Cloudflare アカウント（Pages/Workers 有効）。
 - Gemini API キー（Google AI Studio / Vertex AI などで取得）。
-- Cloudflare KV 名前空間（`TASKS_KV`）。
+- Cloudflare D1 データベース（`webapp-production`）。
 
 ### ローカル開発
 ```bash
 npm install
-npm run build          # SSR bundle を生成
-npm run preview        # wrangler pages dev を起動
+npm run db:migrate:local  # D1マイグレーション（ローカル）
+npm run build             # SSR bundle を生成
+npm run preview           # wrangler pages dev を起動（D1 --local付き）
 ```
 開発中は `npm run dev` で Vite 開発サーバー、Cloudflare Workers 実機テストは `npm run preview` を推奨。
 
@@ -100,16 +117,35 @@ npm run preview        # wrangler pages dev を起動
 # Gemini API キーを Workers Secret に登録
 wrangler secret put GEMINI_API_KEY
 
-# KV 名前空間を wrangler.jsonc に設定
-"kv_namespaces": [
+# D1 データベースを wrangler.jsonc に設定
+"d1_databases": [
   {
-    "binding": "TASKS_KV",
-    "id": "YOUR_PRODUCTION_ID",
-    "preview_id": "YOUR_PREVIEW_ID"
+    "binding": "DB",
+    "database_name": "webapp-production",
+    "database_id": "YOUR_DATABASE_ID"
   }
 ]
 ```
+
+**D1データベースのセットアップ:**
+```bash
+# 1. D1データベース作成
+npx wrangler d1 create webapp-production
+
+# 2. マイグレーション適用（ローカル）
+npm run db:migrate:local
+
+# 3. マイグレーション適用（本番）
+npm run db:migrate:prod
+
+# 4. データベース確認
+npm run db:console:local
+npm run db:console:prod
+```
+
 Cloudflare Pages で運用する場合、`wrangler pages project create` → `wrangler pages deploy dist --project-name <project>` を利用します。
+
+**注意**: Cloudflare PagesでD1バインディングが認識されない場合は、Cloudflare Dashboardから手動でバインディングを設定してください。
 
 ### 設定値 (.dev.vars / Secrets)
 | KEY | 役割 | 既定値 |
