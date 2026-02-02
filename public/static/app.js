@@ -16,7 +16,7 @@ const MAX_DURATION_MS = 3 * 60 * 60 * 1000 // 3 hours
 const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 const STATUS_POLL_INTERVAL_MS = 6000  // Poll every 6 seconds
 const MERGE_RETRY_DELAY_MS = 6000  // Wait 6 seconds between status checks
-const AUTO_REPROCESS_THRESHOLD = 60  // 60 checks × 6s = 360s (6 minutes without progress)
+const AUTO_REPROCESS_THRESHOLD = 300  // 300 checks × 6s = 1800s (30 minutes without progress)
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -612,10 +612,19 @@ function handleQueueStallDetection(summary) {
   // Create digest to detect progress
   const currentDigest = `${completed}-${processing}-${queued}`
   
+  // Debug logging
+  console.log('[Stall Detection]', {
+    currentDigest,
+    lastDigest: state.lastChunkSummaryDigest,
+    stallCount: state.queueStalledCount,
+    waitingForMerge: state.waitingForMerge
+  })
+  
   // Only count as stalled if no progress was made
   if (queued > 0 || processing > 0) {
     // If this is the first check (digest is empty), just initialize it
     if (state.lastChunkSummaryDigest === '') {
+      console.log('[Stall Detection] First check - initializing digest')
       state.lastChunkSummaryDigest = currentDigest
       state.queueStalledCount = 0
       return
@@ -624,6 +633,7 @@ function handleQueueStallDetection(summary) {
     if (currentDigest === state.lastChunkSummaryDigest) {
       // No progress since last check
       state.queueStalledCount += 1
+      console.log('[Stall Detection] No progress detected, count:', state.queueStalledCount)
       
       if (
         state.waitingForMerge &&
@@ -635,10 +645,12 @@ function handleQueueStallDetection(summary) {
       }
     } else {
       // Progress detected, reset counter
+      console.log('[Stall Detection] Progress detected, resetting counter')
       state.queueStalledCount = 0
       state.lastChunkSummaryDigest = currentDigest
     }
   } else {
+    console.log('[Stall Detection] No queued/processing chunks, resetting')
     state.queueStalledCount = 0
     state.lastChunkSummaryDigest = ''
   }
