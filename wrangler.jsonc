@@ -6,8 +6,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "webapp-production",
-      "database_id": "5cabb78a-ece6-4fcd-bdeb-a72c32708fa2"
+      "database_name": "yasufumi-yamazaki-tax-office-db",
+      "database_id": "4531ceea-ce5a-41a1-b3e6-d1fa937a8de5"
     }
   ]
 }

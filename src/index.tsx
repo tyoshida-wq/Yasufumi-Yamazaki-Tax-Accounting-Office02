@@ -360,9 +360,9 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
 
   await ensureTaskTranscribing(c.env, task)
 
-  // Start processing only a small batch in waitUntil to avoid timeout
-  // Client will trigger further processing via /process endpoint or auto-polling
-  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 2 }).catch((error) => {
+  // Process all queued chunks in background
+  // maxIterations removed to allow full queue processing
+  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 50 }).catch((error) => {
     console.error('processChunkQueue error (waitUntil)', error)
   })
   if (c.executionCtx) {
@@ -781,6 +781,28 @@ async function getQueuedChunkJobs(
   batchLimit: number
 ): Promise<ChunkJobRecord[]> {
   const now = Date.now()
+  const STUCK_JOB_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes
+  
+  // First, detect and reset stuck processing jobs (updated_at > 2 minutes ago)
+  const stuckThreshold = new Date(now - STUCK_JOB_TIMEOUT_MS).toISOString()
+  const stuckReset = await env.DB.prepare(
+    `UPDATE chunk_jobs 
+     SET status = 'queued', processing_by = NULL, updated_at = ?
+     WHERE task_id = ? AND status = 'processing' AND updated_at < ?`
+  ).bind(new Date(now).toISOString(), taskId, stuckThreshold).run()
+  
+  if (stuckReset.meta.changes > 0) {
+    console.log(`Reset ${stuckReset.meta.changes} stuck processing jobs for task ${taskId}`)
+  }
+  
+  // Also update chunk_states for reset jobs
+  if (stuckReset.meta.changes > 0) {
+    await env.DB.prepare(
+      `UPDATE chunk_states 
+       SET status = 'queued', updated_at = ?
+       WHERE task_id = ? AND status = 'processing'`
+    ).bind(new Date(now).toISOString(), taskId).run()
+  }
   
   const results = await env.DB.prepare(
     `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status, 
