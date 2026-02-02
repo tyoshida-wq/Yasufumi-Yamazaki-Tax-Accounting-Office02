@@ -1762,16 +1762,76 @@ function sanitizeTimestamp(text: string): string {
  * Correct timestamps by adding chunk start offset
  * Handles both MM:SS and HH:MM:SS formats
  */
+/**
+ * Detect if AI already output corrected timestamps
+ * Prevents double correction that would cause timestamps to be ~2x actual time
+ */
+function detectIfAlreadyCorrected(text: string, chunkStartMs: number): boolean {
+  const lines = text.split('\n')
+  const chunkStartSeconds = Math.floor(chunkStartMs / 1000)
+  
+  // No correction needed for chunk 0
+  if (chunkStartSeconds === 0) {
+    return true  // Will skip correction
+  }
+  
+  // Check first few timestamps
+  let timestampsNearStart = 0
+  let timestampsChecked = 0
+  const toleranceSeconds = 60  // ±60 seconds tolerance
+  
+  for (const line of lines.slice(0, 10)) {
+    const match = line.match(/^(\s*)(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+    if (match) {
+      const [_, __, p1, p2, p3] = match
+      let seconds = 0
+      if (p3) {
+        seconds = parseInt(p1) * 3600 + parseInt(p2) * 60 + parseInt(p3)
+      } else {
+        seconds = parseInt(p1) * 60 + parseInt(p2)
+      }
+      
+      timestampsChecked++
+      
+      // Check if timestamp is near chunk start time (±60 seconds)
+      if (Math.abs(seconds - chunkStartSeconds) <= toleranceSeconds) {
+        timestampsNearStart++
+      }
+      
+      // If chunk starts after 2 minutes but timestamps are < 1 minute, needs correction
+      if (seconds < 60 && chunkStartSeconds > 120) {
+        return false  // Clearly needs correction
+      }
+    }
+    
+    if (timestampsChecked >= 3) break
+  }
+  
+  // If majority of timestamps are near chunk start, already corrected
+  return timestampsChecked >= 2 && timestampsNearStart >= timestampsChecked / 2
+}
+
 function correctTimestamps(text: string, chunkStartMs: number): string {
   const offsetSeconds = Math.floor(chunkStartMs / 1000)
   
   // First, sanitize abnormal formats
   text = sanitizeTimestamp(text)
   
+  // Check if AI already output corrected timestamps
+  if (offsetSeconds === 0) {
+    // Chunk 0 doesn't need correction
+    return text
+  }
+  
+  const isAlreadyCorrected = detectIfAlreadyCorrected(text, chunkStartMs)
+  
+  if (isAlreadyCorrected) {
+    // AI already output correct timestamps, skip correction
+    return text
+  }
+  
   // Match MM:SS or HH:MM:SS at line start (with optional whitespace)
   const timestampPattern = /^(\s*)(\d{1,2}):(\d{2})(?::(\d{2}))?(\s+)/gm
-  
-  let correctionsMade = 0
   
   const corrected = text.replace(timestampPattern, (match, leadingSpace, p1, p2, p3, trailingSpace) => {
     let totalSeconds = 0
@@ -1786,11 +1846,6 @@ function correctTimestamps(text: string, chunkStartMs: number): string {
     
     // Add offset
     const correctedSeconds = totalSeconds + offsetSeconds
-    
-    // Track if correction was needed
-    if (totalSeconds < offsetSeconds && offsetSeconds > 60) {
-      correctionsMade++
-    }
     
     // Reformat
     const hours = Math.floor(correctedSeconds / 3600)
@@ -1943,33 +1998,47 @@ async function callGeminiFlashTranscription(
         }
         const rawTranscript = text.trim()
         
-        // Apply timestamp correction (hybrid approach)
-        const correctedTranscript = correctTimestamps(rawTranscript, chunkStartMs)
-        
-        // Log if correction was applied
-        if (rawTranscript !== correctedTranscript) {
-          await appendTaskLog(env, taskId, {
-            level: 'info',
-            message: `Chunk ${chunkIndex}: Timestamps auto-corrected`,
-            context: {
-              chunkIndex,
-              attempt,
-              rawLength: rawTranscript.length,
-              correctedLength: correctedTranscript.length,
-              offsetMs: chunkStartMs
+        // Extract first few timestamps for debugging
+        const extractFirstTimestamps = (text: string, count: number = 5): number[] => {
+          const timestamps: number[] = []
+          const lines = text.split('\n')
+          for (const line of lines.slice(0, 20)) {
+            const ts = getTimestampMs(line)
+            if (ts !== null) {
+              timestamps.push(Math.floor(ts / 1000))  // Convert to seconds
+              if (timestamps.length >= count) break
             }
-          })
+          }
+          return timestamps
         }
         
+        const firstTimestampsRaw = extractFirstTimestamps(rawTranscript, 5)
+        
+        // Apply timestamp correction (hybrid approach with double-correction prevention)
+        const correctedTranscript = correctTimestamps(rawTranscript, chunkStartMs)
+        
+        const firstTimestampsCorrected = extractFirstTimestamps(correctedTranscript, 5)
+        const correctionApplied = rawTranscript !== correctedTranscript
+        
+        // Detailed logging for debugging
         await appendTaskLog(env, taskId, {
           level: 'info',
-          message: 'Gemini Flash transcription success',
+          message: correctionApplied 
+            ? `Chunk ${chunkIndex}: Timestamps corrected` 
+            : `Chunk ${chunkIndex}: No correction needed (AI output already correct)`,
           context: {
             chunkIndex,
             attempt,
-            textLength: correctedTranscript.length
+            chunkStartSec: Math.floor(chunkStartMs / 1000),
+            chunkEndSec: Math.floor(chunkEndMs / 1000),
+            firstTimestampsRaw,
+            firstTimestampsCorrected,
+            correctionApplied,
+            rawLength: rawTranscript.length,
+            correctedLength: correctedTranscript.length
           }
         })
+        
         return correctedTranscript
       }
 
