@@ -838,9 +838,9 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
       // Save to chunks table
       await env.DB.prepare(
         `INSERT OR REPLACE INTO chunks 
-         (task_id, chunk_index, start_ms, end_ms, transcript_text, size_bytes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(taskId, chunkIndex, startMs, endMs, transcriptText, sizeBytes, completedAt, completedAt).run()
+         (task_id, chunk_index, start_ms, end_ms, text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(taskId, chunkIndex, startMs, endMs, transcriptText, completedAt).run()
       
       // Update chunk_jobs status
       await env.DB.prepare(
