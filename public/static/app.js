@@ -1122,10 +1122,20 @@ function startWaveformDrawing() {
     
     state.analyser.getByteTimeDomainData(dataArray)
     
+    // Clear canvas with white background
     canvasCtx.fillStyle = 'rgb(255, 255, 255)'
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height)
     
-    canvasCtx.lineWidth = 2
+    // Draw center line
+    canvasCtx.strokeStyle = 'rgb(226, 232, 240)'
+    canvasCtx.lineWidth = 1
+    canvasCtx.beginPath()
+    canvasCtx.moveTo(0, canvas.height / 2)
+    canvasCtx.lineTo(canvas.width, canvas.height / 2)
+    canvasCtx.stroke()
+    
+    // Draw waveform with increased amplitude
+    canvasCtx.lineWidth = 2.5
     canvasCtx.strokeStyle = 'rgb(16, 185, 129)'
     canvasCtx.beginPath()
     
@@ -1133,8 +1143,10 @@ function startWaveformDrawing() {
     let x = 0
     
     for (let i = 0; i < bufferLength; i++) {
-      const v = dataArray[i] / 128.0
-      const y = v * canvas.height / 2
+      // Normalize value from 0-255 to -1 to 1, then amplify
+      const v = (dataArray[i] - 128) / 128.0
+      // Amplify the signal by 3x and add offset to center
+      const y = (canvas.height / 2) + (v * canvas.height / 2 * 3)
       
       if (i === 0) {
         canvasCtx.moveTo(x, y)
@@ -1145,7 +1157,6 @@ function startWaveformDrawing() {
       x += sliceWidth
     }
     
-    canvasCtx.lineTo(canvas.width, canvas.height / 2)
     canvasCtx.stroke()
   }
   
