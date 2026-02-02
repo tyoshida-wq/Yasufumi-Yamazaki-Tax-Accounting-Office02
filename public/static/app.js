@@ -511,8 +511,19 @@ async function uploadChunk(taskId, chunk) {
 
   const data = await response.json()
   logResponse(data)
+  
   if (!response.ok) {
-    throw new Error(data?.error || `チャンク ${chunk.index} のアップロードに失敗しました`)
+    console.error('[uploadChunk] Error response:', {
+      status: response.status,
+      statusText: response.statusText,
+      data
+    })
+    
+    const errorMsg = data?.details 
+      ? `${data.error}: ${data.details}`
+      : (data?.error || `チャンク ${chunk.index} のアップロードに失敗しました`)
+    
+    throw new Error(errorMsg)
   }
 }
 
