@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
-const GEMINI_FLASH_MODEL = 'gemini-3.0-flash-preview'
-const GEMINI_PRO_MODEL = 'gemini-3.0-pro-preview'
+const GEMINI_FLASH_MODEL = 'gemini-3-flash-preview'
+const GEMINI_PRO_MODEL = 'gemini-3-pro-preview'
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com'
 
 const TIMESTAMP_PATTERN = /^\s*(\d{2}):(\d{2})(?::(\d{2}))?/ // Supports mm:ss or hh:mm:ss
@@ -787,10 +787,16 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
       }
       
       const transcriptText = await callGeminiFlashTranscription(
-        apiKey,
-        base64Audio,
-        mimeType,
-        chunkIndex
+        env,
+        taskId,
+        {
+          apiKey,
+          audioBase64: base64Audio,
+          mimeType,
+          chunkIndex,
+          chunkStartMs: startMs,
+          chunkEndMs: endMs
+        }
       )
       
       // Step 4: Save result to D1
