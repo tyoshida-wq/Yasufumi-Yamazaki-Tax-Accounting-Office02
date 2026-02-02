@@ -350,8 +350,10 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
 
   await ensureTaskTranscribing(c.env, task)
 
-  const queuePromise = processChunkQueue(c.env, taskId).catch((error) => {
-    console.error('processChunkQueue error', error)
+  // Start processing only a small batch in waitUntil to avoid timeout
+  // Client will trigger further processing via /process endpoint or auto-polling
+  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 2 }).catch((error) => {
+    console.error('processChunkQueue error (waitUntil)', error)
   })
   if (c.executionCtx) {
     c.executionCtx.waitUntil(queuePromise)
