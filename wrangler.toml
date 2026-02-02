@@ -1,0 +1,33 @@
+name = "yasufumi-yamazaki-tax-accounting-office02"
+main = "src/index.tsx"
+compatibility_date = "2026-02-02"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "yasufumi-yamazaki-tax-office-db"
+database_id = "4531ceea-ce5a-41a1-b3e6-d1fa937a8de5"
+
+# R2 Bucket for audio chunks
+[[r2_buckets]]
+binding = "AUDIO_CHUNKS"
+bucket_name = "tax-minutes-audio-chunks"
+
+# Queue Producer
+[[queues.producers]]
+queue = "tax-transcription-queue"
+binding = "TRANSCRIPTION_QUEUE"
+
+# Queue Consumer
+[[queues.consumers]]
+queue = "tax-transcription-queue"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+max_concurrency = 2
+dead_letter_queue = "transcription-dlq"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"

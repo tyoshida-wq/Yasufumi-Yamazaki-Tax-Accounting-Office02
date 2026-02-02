@@ -2,15 +2,15 @@
   "name": "webapp",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "wrangler dev src/index.tsx",
     "build": "vite build",
-    "preview": "wrangler pages dev",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name yasufumi-yamazaki-tax-accounting-office02",
+    "preview": "wrangler dev dist/_worker.js",
+    "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
-    "db:migrate:local": "wrangler d1 migrations apply webapp-production --local",
-    "db:migrate:prod": "wrangler d1 migrations apply webapp-production",
-    "db:console:local": "wrangler d1 execute webapp-production --local",
-    "db:console:prod": "wrangler d1 execute webapp-production"
+    "db:migrate:local": "wrangler d1 migrations apply yasufumi-yamazaki-tax-office-db --local",
+    "db:migrate:prod": "wrangler d1 migrations apply yasufumi-yamazaki-tax-office-db",
+    "db:console:local": "wrangler d1 execute yasufumi-yamazaki-tax-office-db --local",
+    "db:console:prod": "wrangler d1 execute yasufumi-yamazaki-tax-office-db"
   },
   "dependencies": {
     "hono": "^4.11.7"

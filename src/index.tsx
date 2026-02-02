@@ -27,6 +27,8 @@ const MAX_CHUNK_JOB_ATTEMPTS_LIMIT = 12
 interface Bindings {
   GEMINI_API_KEY: string
   DB: D1Database
+  AUDIO_CHUNKS: R2Bucket
+  TRANSCRIPTION_QUEUE: Queue<ChunkJobMessage>
   CHUNK_SIZE_BYTES?: string
   CHUNK_OVERLAP_SECONDS?: string
   TRANSCRIPTION_MAX_CONCURRENCY?: string
@@ -48,6 +50,11 @@ type TaskLogInput = Omit<TaskLogEntry, 'timestamp'> & { timestamp?: string }
 type ChunkJobMessage = {
   taskId: string
   chunkIndex: number
+  r2Key: string
+  startMs: number
+  endMs: number
+  mimeType: string
+  sizeBytes: number
 }
 
 type TaskStatus =
@@ -340,23 +347,55 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
     return c.json({ chunk: existingChunk, task }, 200)
   }
 
+  // Step 1: Save audio to R2
+  const r2Key = `${taskId}/${chunkIndex}.${audio.type?.split('/')[1] || 'webm'}`
   const audioBuffer = await audio.arrayBuffer()
-  const base64Audio = arrayBufferToBase64(audioBuffer)
+  
+  await c.env.AUDIO_CHUNKS.put(r2Key, audioBuffer, {
+    httpMetadata: {
+      contentType: audio.type || 'audio/webm'
+    },
+    customMetadata: {
+      taskId,
+      chunkIndex: String(chunkIndex),
+      startMs: String(startMs),
+      endMs: String(endMs),
+      sizeBytes: String(audio.size)
+    }
+  })
 
-  const job = await enqueueChunkJob(c.env, taskId, {
+  // Step 2: Save metadata to D1
+  const now = new Date().toISOString()
+  await c.env.DB.prepare(
+    `INSERT OR REPLACE INTO chunk_jobs 
+     (task_id, chunk_index, start_ms, end_ms, mime_type, size_bytes, attempts, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 'queued', ?, ?)`
+  ).bind(taskId, chunkIndex, startMs, endMs, audio.type || 'audio/webm', audio.size, now, now).run()
+
+  await saveChunkState(c.env, taskId, {
     index: chunkIndex,
+    status: 'queued',
+    attempts: 0,
+    updatedAt: now
+  })
+
+  // Step 3: Send message to Queue
+  await c.env.TRANSCRIPTION_QUEUE.send({
+    taskId,
+    chunkIndex,
+    r2Key,
     startMs,
     endMs,
     mimeType: audio.type || 'audio/webm',
-    audioBase64: base64Audio,
     sizeBytes: audio.size
   })
 
   await appendTaskLog(c.env, taskId, {
     level: 'info',
-    message: 'Chunk queued for transcription',
+    message: 'Chunk queued for transcription (R2 + Queue)',
     context: {
       chunkIndex,
+      r2Key,
       startMs,
       endMs,
       sizeBytes: audio.size
@@ -365,18 +404,12 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
 
   await ensureTaskTranscribing(c.env, task)
 
-  // Trigger initial processing with minimal iterations
-  // External cron will continue processing remaining chunks
-  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 2 }).catch((error) => {
-    console.error('processChunkQueue error (waitUntil)', error)
-  })
-  if (c.executionCtx) {
-    c.executionCtx.waitUntil(queuePromise)
-  } else {
-    await queuePromise
-  }
-
-  return c.json({ job: sanitizeChunkJobForResponse(job) }, 202)
+  return c.json({ 
+    message: 'Chunk accepted and queued for processing',
+    chunkIndex,
+    r2Key,
+    queuedAt: now
+  }, 202)
 })
 
 app.post('/api/tasks/:taskId/merge', async (c) => {
@@ -636,68 +669,132 @@ app.get('/api/tasks', async (c) => {
   }
 })
 
-// Cron endpoint for background processing
-app.post('/api/cron/process-queues', async (c) => {
-  console.log('[Cron] Starting background queue processing')
+// Queue Consumer handler (separate from Hono app)
+async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings): Promise<void> {
+  console.log(`[Queue Consumer] Processing ${batch.messages.length} messages`)
   
-  try {
-    // Get all tasks in 'transcribing' status
-    const result = await c.env.DB.prepare(`
-      SELECT id, filename FROM tasks 
-      WHERE status = 'transcribing'
-      ORDER BY created_at ASC
-      LIMIT 10
-    `).all()
+  for (const message of batch.messages) {
+    const { taskId, chunkIndex, r2Key, startMs, endMs, mimeType, sizeBytes } = message.body
     
-    const tasks = result.results || []
-    console.log(`[Cron] Found ${tasks.length} transcribing tasks`)
-    
-    const processResults = []
-    
-    for (const task of tasks) {
-      const taskId = task.id as string
+    try {
+      console.log(`[Queue Consumer] Processing chunk ${chunkIndex} for task ${taskId}`)
       
-      try {
-        // Process up to 10 iterations per task
-        const processResult = await processChunkQueue(c.env, taskId, { 
-          maxIterations: 10 
-        })
-        
-        processResults.push({
-          taskId,
-          filename: task.filename,
-          processed: processResult.processed,
-          remaining: processResult.remaining,
-          status: 'success'
-        })
-        
-        console.log(`[Cron] Task ${taskId} processed:`, processResult)
-      } catch (error) {
-        console.error(`[Cron] Error processing task ${taskId}:`, error)
-        processResults.push({
-          taskId,
-          filename: task.filename,
-          error: error instanceof Error ? error.message : String(error),
-          status: 'error'
-        })
+      // Step 1: Update status to 'processing'
+      const now = new Date().toISOString()
+      const workerId = crypto.randomUUID()
+      
+      await env.DB.prepare(
+        `UPDATE chunk_jobs SET status = 'processing', processing_by = ?, updated_at = ? 
+         WHERE task_id = ? AND chunk_index = ?`
+      ).bind(workerId, now, taskId, chunkIndex).run()
+      
+      await saveChunkState(env, taskId, {
+        index: chunkIndex,
+        status: 'processing',
+        attempts: 0, // Will be incremented on retry
+        updatedAt: now
+      })
+      
+      // Step 2: Get audio from R2
+      const r2Object = await env.AUDIO_CHUNKS.get(r2Key)
+      if (!r2Object) {
+        throw new Error(`R2 object not found: ${r2Key}`)
       }
+      
+      const audioBuffer = await r2Object.arrayBuffer()
+      const base64Audio = arrayBufferToBase64(audioBuffer)
+      
+      // Step 3: Call Gemini API
+      const apiKey = env.GEMINI_API_KEY
+      if (!apiKey) {
+        throw new Error('Gemini API key is not configured')
+      }
+      
+      const transcriptText = await callGeminiFlashTranscription(
+        apiKey,
+        base64Audio,
+        mimeType,
+        chunkIndex
+      )
+      
+      // Step 4: Save result to D1
+      const completedAt = new Date().toISOString()
+      
+      // Save to chunks table
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO chunks 
+         (task_id, chunk_index, start_ms, end_ms, transcript_text, size_bytes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(taskId, chunkIndex, startMs, endMs, transcriptText, sizeBytes, completedAt, completedAt).run()
+      
+      // Update chunk_jobs status
+      await env.DB.prepare(
+        `DELETE FROM chunk_jobs WHERE task_id = ? AND chunk_index = ?`
+      ).bind(taskId, chunkIndex).run()
+      
+      // Update chunk_states
+      await saveChunkState(env, taskId, {
+        index: chunkIndex,
+        status: 'completed',
+        attempts: 0,
+        updatedAt: completedAt
+      })
+      
+      // Step 5: Delete from R2 (cleanup)
+      await env.AUDIO_CHUNKS.delete(r2Key)
+      
+      // Step 6: Log success
+      await appendTaskLog(env, taskId, {
+        level: 'info',
+        message: 'Chunk transcription completed',
+        context: {
+          chunkIndex,
+          transcriptLength: transcriptText.length,
+          processingTime: Date.now() - new Date(now).getTime()
+        }
+      })
+      
+      console.log(`[Queue Consumer] Chunk ${chunkIndex} completed for task ${taskId}`)
+      
+      // Acknowledge successful processing
+      message.ack()
+      
+    } catch (error) {
+      console.error(`[Queue Consumer] Error processing chunk ${chunkIndex}:`, error)
+      
+      // Update error in D1
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorNow = new Date().toISOString()
+      
+      await env.DB.prepare(
+        `UPDATE chunk_jobs SET status = 'queued', processing_by = NULL, last_error = ?, updated_at = ?, attempts = attempts + 1
+         WHERE task_id = ? AND chunk_index = ?`
+      ).bind(errorMessage, errorNow, taskId, chunkIndex).run()
+      
+      await appendTaskLog(env, taskId, {
+        level: 'error',
+        message: 'Chunk transcription failed',
+        context: {
+          chunkIndex,
+          error: errorMessage
+        }
+      })
+      
+      // Retry the message (Cloudflare will handle exponential backoff)
+      message.retry()
     }
-    
-    return c.json({
-      success: true,
-      processedTasks: tasks.length,
-      results: processResults
-    })
-  } catch (error) {
-    console.error('[Cron] Fatal error:', error)
-    return c.json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error)
-    }, 500)
   }
-})
+}
 
-export default app
+// Export Workers handlers
+export default {
+  async fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
+    return app.fetch(request, env, ctx)
+  },
+  async queue(batch: MessageBatch<ChunkJobMessage>, env: Bindings) {
+    return queueHandler(batch, env)
+  }
+}
 
 // Queue consumer for background transcription processing
 export async function queue(batch: MessageBatch<ChunkJobMessage>, env: Bindings): Promise<void> {
