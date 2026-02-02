@@ -14,10 +14,9 @@ const runtimeConfig = {
 
 const MAX_DURATION_MS = 3 * 60 * 60 * 1000 // 3 hours
 const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
-const STATUS_POLL_INTERVAL_MS = 6000
-const MERGE_READY_TIMEOUT_MS = 20 * 60 * 1000  // 20 minutes (36 chunks × 60s ÷ 2 = 18 min + buffer)
-const MERGE_RETRY_DELAY_MS = 6000
-const AUTO_REPROCESS_THRESHOLD = 60  // 60 checks × 6s = 360s (6 minutes)
+const STATUS_POLL_INTERVAL_MS = 6000  // Poll every 6 seconds
+const MERGE_RETRY_DELAY_MS = 6000  // Wait 6 seconds between status checks
+const AUTO_REPROCESS_THRESHOLD = 60  // 60 checks × 6s = 360s (6 minutes without progress)
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -710,9 +709,10 @@ function resetQueueActions() {
   }
 }
 
-async function waitForReadyForMerge(taskId, timeoutMs = MERGE_READY_TIMEOUT_MS) {
-  const startTime = Date.now()
-  while (Date.now() - startTime < timeoutMs) {
+async function waitForReadyForMerge(taskId) {
+  // No timeout - wait indefinitely for completion
+  // Stall detection (AUTO_REPROCESS_THRESHOLD) will handle errors
+  while (true) {
     try {
       const status = await fetchTaskStatus(taskId)
       if (status) {
@@ -745,7 +745,6 @@ async function waitForReadyForMerge(taskId, timeoutMs = MERGE_READY_TIMEOUT_MS) 
     }
     await sleep(MERGE_RETRY_DELAY_MS)
   }
-  throw new Error('チャンク処理が所定時間内に完了しませんでした。サーバーログをご確認ください。')
 }
 
 async function handleTriggerReprocess() {
