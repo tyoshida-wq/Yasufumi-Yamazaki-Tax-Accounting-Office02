@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
+  "name": "yasufumi-yamazaki-tax-accounting-office02",
   "compatibility_date": "2026-02-02",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
@@ -9,8 +9,8 @@
   "kv_namespaces": [
     {
       "binding": "TASKS_KV",
-      "id": "REPLACE_WITH_TASKS_KV_ID",
-      "preview_id": "REPLACE_WITH_TASKS_KV_PREVIEW_ID"
+      "id": "bb3e25a1d35649528218f31c902750e5",
+      "preview_id": "596fa19fee224aaea704ca42ad00fb2b"
     }
   ]
 }
