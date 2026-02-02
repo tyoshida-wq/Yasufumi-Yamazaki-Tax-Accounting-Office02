@@ -804,6 +804,23 @@ async function getQueuedChunkJobs(
     ).bind(new Date(now).toISOString(), taskId).run()
   }
   
+  // CRITICAL: Check how many jobs are currently processing
+  // If we're at the concurrency limit, return empty array to prevent overload
+  const processingCount = await env.DB.prepare(
+    `SELECT COUNT(*) as count FROM chunk_jobs WHERE task_id = ? AND status = 'processing'`
+  ).bind(taskId).first<{ count: number }>()
+  
+  const currentlyProcessing = processingCount?.count || 0
+  if (currentlyProcessing >= limit) {
+    // Already at concurrency limit, don't fetch more jobs
+    console.log(`Concurrency limit reached: ${currentlyProcessing}/${limit} jobs processing for task ${taskId}`)
+    return []
+  }
+  
+  // Calculate how many jobs we can actually process
+  const availableSlots = limit - currentlyProcessing
+  const effectiveLimit = Math.min(availableSlots, limit)
+  
   const results = await env.DB.prepare(
     `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status, 
             last_error, processing_by, retry_at, created_at, updated_at
@@ -811,7 +828,7 @@ async function getQueuedChunkJobs(
      WHERE task_id = ? AND status = 'queued' AND (retry_at IS NULL OR retry_at <= ?)
      ORDER BY chunk_index
      LIMIT ?`
-  ).bind(taskId, new Date(now).toISOString(), limit).all<{
+  ).bind(taskId, new Date(now).toISOString(), effectiveLimit).all<{
     chunk_index: number
     start_ms: number
     end_ms: number

@@ -393,7 +393,11 @@ async function processAudioFile(file) {
     const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
     logStatus(`並列アップロード数: ${uploadConcurrency} (最大2に制限)`)
     
-    // Process chunks in strict batches with completion waiting
+    // Upload all chunks as fast as possible (server will throttle processing)
+    const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
+    logStatus(`並列アップロード数: ${uploadConcurrency} (サーバー側で処理速度制御)`)
+    
+    // Process chunks in strict batches for upload
     for (let i = 0; i < plan.chunks.length; i += uploadConcurrency) {
       const batch = plan.chunks.slice(i, i + uploadConcurrency)
       const batchNum = Math.floor(i / uploadConcurrency) + 1
@@ -406,37 +410,10 @@ async function processAudioFile(file) {
       
       logStatus(`バッチ ${batchNum} 送信完了: ${Math.min(i + uploadConcurrency, plan.chunks.length)}/${plan.chunks.length} チャンク送信済み`)
       
-      // CRITICAL: Wait for this batch to be processed before sending the next batch
-      logStatus(`バッチ ${batchNum} の処理完了を待機中...（最大3分）`)
-      const batchStartIndex = i
-      const batchEndIndex = Math.min(i + uploadConcurrency, plan.chunks.length)
-      
-      let waitAttempts = 0
-      const MAX_WAIT_ATTEMPTS = 36 // 36 * 5s = 3 minutes
-      
-      while (waitAttempts < MAX_WAIT_ATTEMPTS) {
-        await new Promise(resolve => setTimeout(resolve, 5000)) // Wait 5 seconds
-        
-        const status = await fetchTaskStatus(state.taskId)
-        if (status && status.task) {
-          handleStatusUpdate(status)
-          
-          // Check if all chunks in this batch are completed
-          const completedCount = status.task.processedChunks || 0
-          if (completedCount >= batchEndIndex) {
-            logStatus(`バッチ ${batchNum} 処理完了！ (${completedCount}/${state.totalChunks})`)
-            break
-          }
-        }
-        
-        waitAttempts++
-        if (waitAttempts % 6 === 0) { // Every 30 seconds
-          logStatus(`バッチ ${batchNum} 待機中... (${waitAttempts * 5}秒経過、完了: ${status?.task?.processedChunks || 0}/${batchEndIndex})`)
-        }
-      }
-      
-      if (waitAttempts >= MAX_WAIT_ATTEMPTS) {
-        logStatus(`⚠️ バッチ ${batchNum} のタイムアウト。次のバッチに進みます。`)
+      // Update status after each batch
+      const status = await fetchTaskStatus(state.taskId)
+      if (status && status.task) {
+        handleStatusUpdate(status)
       }
     }
 
