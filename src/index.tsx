@@ -1767,12 +1767,14 @@ async function callGeminiFlashTranscription(
     parts: [
       {
         text: [
-          'You are a professional transcription assistant for Japanese tax accountant meetings.',
-          'Always respond using the original language of the speakers.',
-          'Output each utterance on its own line in the format "HH:MM:SS Speaker Name: transcript".',
-          'If the meeting does not exceed one hour you may omit the hour portion and use MM:SS.',
-          'Use absolute timestamps measured from the start of the meeting. The chunk start time is provided; add it to timestamps.',
-          'Do not include duplicate lines or repeated text.'
+          'あなたはプロの文字起こし担当者です。以下の音声ファイルを**一言一句、省略せずに完全に**文字起こししてください。',
+          '',
+          '【厳守事項】',
+          '1. **要約は絶対に禁止です。** 「えー」「あー」などのフィラーや、言い淀みも含めて全て書き起こしてください。',
+          '2. 内容を勝手に編集したり、カットしたりしないでください。',
+          '3. 形式は "MM:SS 話者名: 発言内容" としてください。',
+          '4. タイムスタンプは会議開始からの絶対時刻を使用してください（チャンク開始時刻が提供されているので、それを加算してください）。',
+          '5. 1時間を超える会議の場合は "HH:MM:SS" 形式を使用してください。'
         ].join('\n')
       }
     ]
