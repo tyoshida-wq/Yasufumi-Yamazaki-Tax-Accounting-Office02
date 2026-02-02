@@ -24,6 +24,7 @@ const elements = {
   recordStop: document.getElementById('record-stop'),
   recordStatus: document.getElementById('record-status'),
   recordTimer: document.getElementById('record-timer'),
+  waveformCanvas: document.getElementById('waveform-canvas'),
   fileInput: document.getElementById('file-input'),
   fileSummary: document.getElementById('file-summary'),
   startProcessing: document.getElementById('start-processing'),
@@ -47,6 +48,9 @@ const elements = {
 const state = {
   mediaRecorder: null,
   mediaStream: null,
+  audioContext: null,
+  analyser: null,
+  animationId: null,
   recordTimerId: null,
   recordStartedAt: null,
   recordedChunks: [],
@@ -204,6 +208,14 @@ async function startRecording() {
   if (state.mediaRecorder || state.isProcessing) return
   try {
     state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    
+    // Audio Context and Analyser setup for waveform visualization
+    state.audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    state.analyser = state.audioContext.createAnalyser()
+    state.analyser.fftSize = 2048
+    const source = state.audioContext.createMediaStreamSource(state.mediaStream)
+    source.connect(state.analyser)
+    
     const mimeType = getSupportedMimeType()
     state.mediaRecorder = new MediaRecorder(state.mediaStream, mimeType ? { mimeType } : undefined)
     state.recordedChunks = []
@@ -215,6 +227,7 @@ async function startRecording() {
     state.mediaRecorder.onstart = () => {
       state.recordStartedAt = Date.now()
       startTimer()
+      startWaveformDrawing()
       logStatus('録音を開始しました。最大3時間まで記録できます。')
       elements.recordStatus.textContent = '録音中...'
       elements.recordStatus.classList.add('text-emerald-600')
@@ -224,6 +237,7 @@ async function startRecording() {
     }
     state.mediaRecorder.onstop = async () => {
       stopTimer()
+      stopWaveformDrawing()
       const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder?.mimeType || 'audio/webm' })
       if (blob.size === 0) {
         logStatus('録音データが空でした。再度お試しください。')
@@ -258,11 +272,19 @@ function resetRecordingControls() {
   elements.recordStatus.classList.remove('text-emerald-600')
   state.mediaRecorder = null
   state.mediaStream = null
+  state.audioContext = null
+  state.analyser = null
+  clearWaveformCanvas()
 }
 
 function cleanupMediaStream() {
   state.mediaStream?.getTracks().forEach((track) => track.stop())
   state.mediaStream = null
+  if (state.audioContext) {
+    state.audioContext.close()
+    state.audioContext = null
+  }
+  state.analyser = null
 }
 
 function startTimer() {
@@ -1083,4 +1105,64 @@ function setupDragAndDrop() {
       setSelectedFile(file, 'ドラッグ＆ドロップ')
     }
   })
+}
+
+function startWaveformDrawing() {
+  if (!state.analyser || !elements.waveformCanvas) return
+  
+  const canvas = elements.waveformCanvas
+  const canvasCtx = canvas.getContext('2d')
+  const bufferLength = state.analyser.frequencyBinCount
+  const dataArray = new Uint8Array(bufferLength)
+  
+  function draw() {
+    if (!state.analyser) return
+    
+    state.animationId = requestAnimationFrame(draw)
+    
+    state.analyser.getByteTimeDomainData(dataArray)
+    
+    canvasCtx.fillStyle = 'rgb(255, 255, 255)'
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    canvasCtx.lineWidth = 2
+    canvasCtx.strokeStyle = 'rgb(16, 185, 129)'
+    canvasCtx.beginPath()
+    
+    const sliceWidth = canvas.width / bufferLength
+    let x = 0
+    
+    for (let i = 0; i < bufferLength; i++) {
+      const v = dataArray[i] / 128.0
+      const y = v * canvas.height / 2
+      
+      if (i === 0) {
+        canvasCtx.moveTo(x, y)
+      } else {
+        canvasCtx.lineTo(x, y)
+      }
+      
+      x += sliceWidth
+    }
+    
+    canvasCtx.lineTo(canvas.width, canvas.height / 2)
+    canvasCtx.stroke()
+  }
+  
+  draw()
+}
+
+function stopWaveformDrawing() {
+  if (state.animationId) {
+    cancelAnimationFrame(state.animationId)
+    state.animationId = null
+  }
+}
+
+function clearWaveformCanvas() {
+  if (!elements.waveformCanvas) return
+  const canvas = elements.waveformCanvas
+  const canvasCtx = canvas.getContext('2d')
+  canvasCtx.fillStyle = 'rgb(255, 255, 255)'
+  canvasCtx.fillRect(0, 0, canvas.width, canvas.height)
 }
