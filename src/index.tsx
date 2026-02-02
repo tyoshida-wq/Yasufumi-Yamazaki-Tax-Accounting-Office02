@@ -1739,6 +1739,74 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary)
 }
 
+/**
+ * Sanitize abnormal timestamp formats (e.g., milliseconds like 0000:53:724)
+ */
+function sanitizeTimestamp(text: string): string {
+  // Remove abnormal millisecond notations: HH:MM:SSS or MM:SS:SSS
+  text = text.replace(/(\d{1,2}):(\d{2}):(\d{3,})/g, '$1:$2')
+  
+  // Fix 4+ digit hours: 0000:53 -> 00:53
+  text = text.replace(/(\d{4,}):(\d{2})/g, (match, h, m) => {
+    const hours = Math.floor(parseInt(h) / 100)
+    if (hours > 0) {
+      return `${String(hours).padStart(2, '0')}:${String(parseInt(h) % 100).padStart(2, '0')}:${m}`
+    }
+    return `${String(parseInt(h) % 100).padStart(2, '0')}:${m}`
+  })
+  
+  return text
+}
+
+/**
+ * Correct timestamps by adding chunk start offset
+ * Handles both MM:SS and HH:MM:SS formats
+ */
+function correctTimestamps(text: string, chunkStartMs: number): string {
+  const offsetSeconds = Math.floor(chunkStartMs / 1000)
+  
+  // First, sanitize abnormal formats
+  text = sanitizeTimestamp(text)
+  
+  // Match MM:SS or HH:MM:SS at line start (with optional whitespace)
+  const timestampPattern = /^(\s*)(\d{1,2}):(\d{2})(?::(\d{2}))?(\s+)/gm
+  
+  let correctionsMade = 0
+  
+  const corrected = text.replace(timestampPattern, (match, leadingSpace, p1, p2, p3, trailingSpace) => {
+    let totalSeconds = 0
+    
+    if (p3) {
+      // HH:MM:SS format
+      totalSeconds = parseInt(p1) * 3600 + parseInt(p2) * 60 + parseInt(p3)
+    } else {
+      // MM:SS format
+      totalSeconds = parseInt(p1) * 60 + parseInt(p2)
+    }
+    
+    // Add offset
+    const correctedSeconds = totalSeconds + offsetSeconds
+    
+    // Track if correction was needed
+    if (totalSeconds < offsetSeconds && offsetSeconds > 60) {
+      correctionsMade++
+    }
+    
+    // Reformat
+    const hours = Math.floor(correctedSeconds / 3600)
+    const minutes = Math.floor((correctedSeconds % 3600) / 60)
+    const seconds = correctedSeconds % 60
+    
+    if (hours > 0) {
+      return `${leadingSpace}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}${trailingSpace}`
+    } else {
+      return `${leadingSpace}${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}${trailingSpace}`
+    }
+  })
+  
+  return corrected
+}
+
 async function callGeminiFlashTranscription(
   env: Bindings,
   taskId: string,
@@ -1781,9 +1849,15 @@ async function callGeminiFlashTranscription(
           '1. **要約は絶対に禁止です。** 「えー」「あー」などのフィラーや、言い淀みも含めて全て書き起こしてください。',
           '2. 内容を勝手に編集したり、カットしたりしないでください。',
           '3. 形式は "MM:SS 話者名: 発言内容" としてください。',
-          '4. **【重要】タイムスタンプは会議開始からの絶対時刻を使用してください。この音声チャンクは会議の途中から始まります。',
-          '5. 1時間を超える会議の場合は "HH:MM:SS" 形式を使用してください。',
-          '6. **ミリ秒は出力しないでください。** MM:SS または HH:MM:SS 形式のみ使用してください。'
+          '',
+          '【タイムスタンプの重要ルール】',
+          `4. この音声チャンクは会議開始から ${startTimeFormatted} の時点から始まります。`,
+          `5. 音声内の各タイムスタンプには必ず ${startTimeFormatted} を加算してください。`,
+          '6. **絶対に 00:00 から始めないでください。** 必ずチャンク開始時刻を基準にしてください。',
+          '7. 1時間を超える会議の場合は "HH:MM:SS" 形式を使用してください。',
+          '8. **ミリ秒は出力しないでください。** MM:SS または HH:MM:SS 形式のみ使用してください。',
+          '',
+          `例: 音声内で最初の発言が3秒後なら → ${startTimeFormatted} + 0:03 のタイムスタンプを使用`
         ].join('\n')
       }
     ]
@@ -1867,17 +1941,36 @@ async function callGeminiFlashTranscription(
         if (!text) {
           throw new Error('Gemini Flash returned no transcription text')
         }
-        const trimmed = text.trim()
+        const rawTranscript = text.trim()
+        
+        // Apply timestamp correction (hybrid approach)
+        const correctedTranscript = correctTimestamps(rawTranscript, chunkStartMs)
+        
+        // Log if correction was applied
+        if (rawTranscript !== correctedTranscript) {
+          await appendTaskLog(env, taskId, {
+            level: 'info',
+            message: `Chunk ${chunkIndex}: Timestamps auto-corrected`,
+            context: {
+              chunkIndex,
+              attempt,
+              rawLength: rawTranscript.length,
+              correctedLength: correctedTranscript.length,
+              offsetMs: chunkStartMs
+            }
+          })
+        }
+        
         await appendTaskLog(env, taskId, {
           level: 'info',
           message: 'Gemini Flash transcription success',
           context: {
             chunkIndex,
             attempt,
-            textLength: trimmed.length
+            textLength: correctedTranscript.length
           }
         })
-        return trimmed
+        return correctedTranscript
       }
 
       const errorDetails = await parseGeminiErrorResponse(response)
