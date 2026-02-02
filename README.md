@@ -16,6 +16,7 @@
 - 文字起こし全文および議事録のコピー、ダウンロード (TXT/Markdown) に対応。
 - フロントエンドで進捗ログ・APIレスポンス、キュー状態（待機/処理中/完了/エラー）・サーバーログをリアルタイム表示。
 - 約 6 秒ごとに `/status` をポーリングし、未処理チャンクの再処理・結合再試行ボタンを自動表示することでリカバリを支援。
+- チャンク処理の停滞を 3 回検知すると自動で `/process?reason=auto` を呼び出し、サーバー側ログにも `Chunk queue stalled` を記録。
 
 ## アーキテクチャ
 ```
@@ -40,7 +41,7 @@ Cloudflare Pages + Workers (Hono)
 | `POST` | `/api/tasks` | 新規タスク作成（チャンク総数・ファイル情報） |
 | `GET` | `/api/tasks/:taskId/status` | 処理状況、全文/議事録の有無を返却 |
 | `POST` | `/api/tasks/:taskId/chunks` | チャンク音声を送信し、Gemini Flash で文字起こし |
-| `POST` | `/api/tasks/:taskId/process` | キューに残るチャンクの処理を手動トリガー |
+| `POST` | `/api/tasks/:taskId/process` | キューに残るチャンクの処理をトリガー。`?reason=manual|auto` を指定可能 |
 | `GET` | `/api/tasks/:taskId/logs` | タスクごとのサーバーログ（最新60件まで）を取得 |
 | `POST` | `/api/tasks/:taskId/merge` | チャンク全文をタイムスタンプ基準で結合（未完了時は409 + chunkSummary を返却） |
 | `GET` | `/api/tasks/:taskId/transcript` | 結合済み全文を取得 |
@@ -53,6 +54,7 @@ Cloudflare Pages + Workers (Hono)
 - `TASKS_KV` に `task:${id}`, `task:${id}:job:${index}`, `task:${id}:chunk:${index}`, `task:${id}:chunk-state:${index}`, `task:${id}:transcript`, `task:${id}:minutes` を保存。
 - ステータス: `initialized` → `transcribing` → `transcribed` → `completed`。エラー時 `error`。
 - チャンク状態: `queued` / `processing` / `completed` / `error` を `task:${id}:chunk-state:${index}` で追跡。
+- `/api/tasks/:taskId/process` 実行時に `reason` とキュー残数をサーバーログへ記録。停滞が続くと `Chunk queue stalled after reprocess attempt` を警告出力。
 
 ## デプロイ状況
 - **本番**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
@@ -68,7 +70,8 @@ Cloudflare Pages + Workers (Hono)
 5. 必要に応じて「議事録生成」ボタンで `/minutes` を呼び出す。
 6. 結果をコピーまたはダウンロード可能。
 
-- UI の「未処理チャンクを再処理」ボタンは `/api/tasks/:taskId/process` を呼び出して残チャンクを再キューイングします。
+- UI の「未処理チャンクを再処理」ボタンは `/api/tasks/:taskId/process?reason=manual` を呼び出して残チャンクを再キューイングします。
+- `/status` ポーリングでキュー停滞を検知すると自動的に `/api/tasks/:taskId/process?reason=auto` を実行します（サーバーログに記録）。
 - 「結合を再試行」ボタンは再度 `/api/tasks/:taskId/merge` を試行し、準備完了後に全文を取得できます。
 
 > **注意**: チャンク時間は平均ビットレートから算出するため可逆的ではありません。実運用時は音声のエンコード条件に応じた補正・メタデータ利用をご検討ください。

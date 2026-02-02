@@ -231,11 +231,50 @@ app.post('/api/tasks/:taskId/process', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
+  const reasonParam = c.req.query('reason')
+  const reason = reasonParam && reasonParam.length > 0 ? reasonParam : 'manual'
+
   const result = await processChunkQueue(c.env, taskId)
+  const summary = result.summary ?? {
+    total: 0,
+    queued: 0,
+    processing: 0,
+    completed: 0,
+    error: 0
+  }
+
+  await appendTaskLog(c.env, taskId, {
+    level: result.processed > 0 ? 'info' : 'warn',
+    message: 'Chunk reprocess triggered',
+    context: {
+      reason,
+      processed: result.processed,
+      remaining: result.remaining,
+      queued: summary.queued,
+      processing: summary.processing,
+      completed: summary.completed,
+      error: summary.error
+    }
+  })
+
+  if (result.processed === 0 && result.remaining > 0) {
+    await appendTaskLog(c.env, taskId, {
+      level: 'warn',
+      message: 'Chunk queue stalled after reprocess attempt',
+      context: {
+        reason,
+        remaining: result.remaining,
+        queued: summary.queued,
+        processing: summary.processing
+      }
+    })
+  }
+
   return c.json({
     processed: result.processed,
     remaining: result.remaining,
-    chunkSummary: result.summary
+    chunkSummary: summary,
+    reason
   })
 })
 

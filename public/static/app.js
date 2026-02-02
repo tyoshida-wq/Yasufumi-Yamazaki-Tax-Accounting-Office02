@@ -17,6 +17,7 @@ const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 const STATUS_POLL_INTERVAL_MS = 6000
 const MERGE_READY_TIMEOUT_MS = 120_000
 const MERGE_RETRY_DELAY_MS = 6000
+const AUTO_REPROCESS_THRESHOLD = 3
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -61,7 +62,9 @@ const state = {
   latestStatus: null,
   waitingForMerge: false,
   lastTaskErrorMessage: null,
-  lastChunkSummaryDigest: ''
+  lastChunkSummaryDigest: '',
+  queueStalledCount: 0,
+  autoReprocessInProgress: false
 }
 
 async function loadRuntimeConfig() {
@@ -309,6 +312,8 @@ async function processAudioFile(file) {
   state.waitingForMerge = false
   state.lastTaskErrorMessage = null
   state.lastChunkSummaryDigest = ''
+  state.queueStalledCount = 0
+  state.autoReprocessInProgress = false
   updateResultPanels()
   toggleResultButtons(false)
   elements.startProcessing.disabled = true
@@ -370,6 +375,7 @@ async function processAudioFile(file) {
     await fetchTaskLogs(state.taskId)
 
     state.waitingForMerge = true
+    state.queueStalledCount = 0
     const readinessStatus = await waitForReadyForMerge(state.taskId)
     if (readinessStatus) {
       handleStatusUpdate(readinessStatus)
@@ -542,12 +548,36 @@ function handleStatusUpdate(status) {
     }
   }
 
+  handleQueueStallDetection(summary)
+
   if (status.task.status === 'error' && status.task.error && state.lastTaskErrorMessage !== status.task.error) {
     state.lastTaskErrorMessage = status.task.error
     logStatus(`サーバー側でエラー: ${status.task.error}`, 'error')
   }
 
   updateQueueActionVisibility(status)
+}
+
+function handleQueueStallDetection(summary) {
+  if (!summary || typeof summary !== 'object') {
+    state.queueStalledCount = 0
+    return
+  }
+  const queued = summary.queued ?? 0
+  const processing = summary.processing ?? 0
+  if (queued > 0 || processing > 0) {
+    state.queueStalledCount += 1
+    if (
+      state.waitingForMerge &&
+      !state.autoReprocessInProgress &&
+      state.queueStalledCount >= AUTO_REPROCESS_THRESHOLD
+    ) {
+      logStatus('チャンク処理の停滞を検知したため、自動的に再処理を試行します。', 'warn')
+      void autoTriggerReprocess()
+    }
+  } else {
+    state.queueStalledCount = 0
+  }
 }
 
 function updateQueueActionVisibility(status) {
@@ -610,6 +640,8 @@ function setElementVisibility(element, visible) {
 }
 
 function resetQueueActions() {
+  state.queueStalledCount = 0
+  state.autoReprocessInProgress = false
   if (elements.triggerReprocess) {
     elements.triggerReprocess.disabled = false
     setElementVisibility(elements.triggerReprocess, false)
@@ -663,9 +695,10 @@ async function handleTriggerReprocess() {
   if (elements.triggerReprocess) {
     elements.triggerReprocess.disabled = true
   }
+  state.queueStalledCount = 0
   logStatus('未処理チャンクの再処理をリクエストしています...')
   try {
-    const response = await fetch(`/api/tasks/${state.taskId}/process`, { method: 'POST' })
+    const response = await fetch(`/api/tasks/${state.taskId}/process?reason=manual`, { method: 'POST' })
     const data = await response.json().catch(() => ({}))
     logResponse(data)
     if (!response.ok) {
@@ -691,6 +724,28 @@ async function handleTriggerReprocess() {
   }
 }
 
+async function autoTriggerReprocess() {
+  if (!state.taskId) return
+  if (state.autoReprocessInProgress) return
+  state.autoReprocessInProgress = true
+  state.queueStalledCount = 0
+  try {
+    const response = await fetch(`/api/tasks/${state.taskId}/process?reason=auto`, { method: 'POST' })
+    const data = await response.json().catch(() => ({}))
+    logResponse(data)
+    if (!response.ok) {
+      throw new Error(data?.error || '自動再処理のリクエストに失敗しました')
+    }
+    logStatus('サーバーに自動再処理を依頼しました。完了まで少しお待ちください。')
+    await fetchTaskLogs(state.taskId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '自動再処理のリクエストに失敗しました'
+    logStatus(message, 'error')
+  } finally {
+    state.autoReprocessInProgress = false
+  }
+}
+
 async function handleRetryMerge() {
   if (!state.taskId) return
   if (elements.retryMerge) {
@@ -699,6 +754,7 @@ async function handleRetryMerge() {
   logStatus('結合を再試行しています...')
   try {
     state.waitingForMerge = true
+    state.queueStalledCount = 0
     const readinessStatus = await waitForReadyForMerge(state.taskId)
     if (readinessStatus) {
       handleStatusUpdate(readinessStatus)
