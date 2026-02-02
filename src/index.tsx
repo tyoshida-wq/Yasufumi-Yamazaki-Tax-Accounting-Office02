@@ -45,6 +45,11 @@ type TaskLogEntry = {
 
 type TaskLogInput = Omit<TaskLogEntry, 'timestamp'> & { timestamp?: string }
 
+type ChunkJobMessage = {
+  taskId: string
+  chunkIndex: number
+}
+
 type TaskStatus =
   | 'initialized'
   | 'transcribing'
@@ -360,9 +365,9 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
 
   await ensureTaskTranscribing(c.env, task)
 
-  // Process all queued chunks in background
-  // maxIterations removed to allow full queue processing
-  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 50 }).catch((error) => {
+  // Trigger initial processing with minimal iterations
+  // External cron will continue processing remaining chunks
+  const queuePromise = processChunkQueue(c.env, taskId, { maxIterations: 2 }).catch((error) => {
     console.error('processChunkQueue error (waitUntil)', error)
   })
   if (c.executionCtx) {
@@ -631,7 +636,137 @@ app.get('/api/tasks', async (c) => {
   }
 })
 
+// Cron endpoint for background processing
+app.post('/api/cron/process-queues', async (c) => {
+  console.log('[Cron] Starting background queue processing')
+  
+  try {
+    // Get all tasks in 'transcribing' status
+    const result = await c.env.DB.prepare(`
+      SELECT id, filename FROM tasks 
+      WHERE status = 'transcribing'
+      ORDER BY created_at ASC
+      LIMIT 10
+    `).all()
+    
+    const tasks = result.results || []
+    console.log(`[Cron] Found ${tasks.length} transcribing tasks`)
+    
+    const processResults = []
+    
+    for (const task of tasks) {
+      const taskId = task.id as string
+      
+      try {
+        // Process up to 10 iterations per task
+        const processResult = await processChunkQueue(c.env, taskId, { 
+          maxIterations: 10 
+        })
+        
+        processResults.push({
+          taskId,
+          filename: task.filename,
+          processed: processResult.processed,
+          remaining: processResult.remaining,
+          status: 'success'
+        })
+        
+        console.log(`[Cron] Task ${taskId} processed:`, processResult)
+      } catch (error) {
+        console.error(`[Cron] Error processing task ${taskId}:`, error)
+        processResults.push({
+          taskId,
+          filename: task.filename,
+          error: error instanceof Error ? error.message : String(error),
+          status: 'error'
+        })
+      }
+    }
+    
+    return c.json({
+      success: true,
+      processedTasks: tasks.length,
+      results: processResults
+    })
+  } catch (error) {
+    console.error('[Cron] Fatal error:', error)
+    return c.json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    }, 500)
+  }
+})
+
 export default app
+
+// Queue consumer for background transcription processing
+export async function queue(batch: MessageBatch<ChunkJobMessage>, env: Bindings): Promise<void> {
+  const config = getRuntimeConfig(env)
+  
+  for (const message of batch.messages) {
+    const { taskId, chunkIndex } = message.body
+    
+    try {
+      // Get the queued job from D1
+      const job = await env.DB.prepare(
+        `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status, 
+                last_error, processing_by, retry_at, created_at, updated_at
+         FROM chunk_jobs 
+         WHERE task_id = ? AND chunk_index = ? AND status = 'queued'`
+      ).bind(taskId, chunkIndex).first<{
+        chunk_index: number
+        start_ms: number
+        end_ms: number
+        mime_type: string
+        audio_base64: string
+        size_bytes: number
+        attempts: number
+        status: ChunkJobStatus
+        last_error: string | null
+        processing_by: string | null
+        retry_at: string | null
+        created_at: string
+        updated_at: string
+      }>()
+      
+      if (!job) {
+        console.log(`Job not found or already processed: task=${taskId} chunk=${chunkIndex}`)
+        message.ack()
+        continue
+      }
+      
+      const jobRecord: ChunkJobRecord = {
+        index: job.chunk_index,
+        startMs: job.start_ms,
+        endMs: job.end_ms,
+        mimeType: job.mime_type,
+        audioBase64: job.audio_base64,
+        sizeBytes: job.size_bytes,
+        attempts: job.attempts,
+        status: job.status,
+        lastError: job.last_error || undefined,
+        processingBy: job.processing_by || undefined,
+        retryAt: job.retry_at || undefined,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at
+      }
+      
+      // Process the chunk
+      const success = await processChunkJob(env, taskId, jobRecord, config)
+      
+      if (success) {
+        console.log(`Successfully processed: task=${taskId} chunk=${chunkIndex}`)
+        message.ack()
+      } else {
+        console.log(`Failed to process: task=${taskId} chunk=${chunkIndex}`)
+        message.retry()
+      }
+    } catch (error) {
+      console.error(`Queue processing error: task=${taskId} chunk=${chunkIndex}`, error)
+      message.retry()
+    }
+  }
+}
 
 function getRuntimeConfig(env: Bindings): RuntimeConfig {
   const chunkSizeBytes = clampNumber(parseInteger(env.CHUNK_SIZE_BYTES, DEFAULT_CHUNK_SIZE_BYTES), 128 * 1024, 8 * 1024 * 1024)
