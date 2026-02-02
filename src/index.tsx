@@ -1762,6 +1762,14 @@ async function callGeminiFlashTranscription(
     previousContext = ''
   } = params
 
+  // Calculate start time in MM:SS or HH:MM:SS format
+  const startSeconds = Math.floor(chunkStartMs / 1000)
+  const startMinutes = Math.floor(startSeconds / 60)
+  const startHours = Math.floor(startMinutes / 60)
+  const startTimeFormatted = startHours > 0
+    ? `${String(startHours).padStart(2, '0')}:${String(startMinutes % 60).padStart(2, '0')}:${String(startSeconds % 60).padStart(2, '0')}`
+    : `${String(startMinutes).padStart(2, '0')}:${String(startSeconds % 60).padStart(2, '0')}`
+
   const systemInstruction = {
     role: 'system',
     parts: [
@@ -1773,8 +1781,9 @@ async function callGeminiFlashTranscription(
           '1. **要約は絶対に禁止です。** 「えー」「あー」などのフィラーや、言い淀みも含めて全て書き起こしてください。',
           '2. 内容を勝手に編集したり、カットしたりしないでください。',
           '3. 形式は "MM:SS 話者名: 発言内容" としてください。',
-          '4. タイムスタンプは会議開始からの絶対時刻を使用してください（チャンク開始時刻が提供されているので、それを加算してください）。',
-          '5. 1時間を超える会議の場合は "HH:MM:SS" 形式を使用してください。'
+          '4. **【重要】タイムスタンプは会議開始からの絶対時刻を使用してください。この音声チャンクは会議の途中から始まります。',
+          '5. 1時間を超える会議の場合は "HH:MM:SS" 形式を使用してください。',
+          '6. **ミリ秒は出力しないでください。** MM:SS または HH:MM:SS 形式のみ使用してください。'
         ].join('\n')
       }
     ]
@@ -1787,13 +1796,25 @@ async function callGeminiFlashTranscription(
   const userParts = [
     {
       text: [
+        `**CRITICAL TIMESTAMP INSTRUCTION:**`,
+        `This audio chunk starts at ${startTimeFormatted} from the beginning of the meeting.`,
+        `You MUST add this offset to all timestamps in your transcription.`,
+        ``,
+        `Example:`,
+        `- If the first utterance in this audio happens at 0:05 within the chunk,`,
+        `- The timestamp should be: ${startTimeFormatted} + 0:05`,
+        ``,
         `Chunk metadata:`,
         `- Index: ${chunkIndex}`,
-        `- Start offset (ms): ${chunkStartMs}`,
+        `- Start offset (ms): ${chunkStartMs} (= ${startTimeFormatted})`,
         `- End offset (ms): ${chunkEndMs}`,
         '',
         contextText,
-        'Transcribe the attached audio chunk and include timestamps as described.'
+        '',
+        '**Format requirement:** MM:SS Speaker: Content (or HH:MM:SS if over 1 hour)',
+        '**NO milliseconds allowed.** Use only MM:SS or HH:MM:SS format.',
+        '',
+        'Transcribe the attached audio chunk and include timestamps as described above.'
       ].join('\n')
     },
     {
