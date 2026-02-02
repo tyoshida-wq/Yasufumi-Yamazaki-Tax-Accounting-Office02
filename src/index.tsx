@@ -379,9 +379,9 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
   const now = new Date().toISOString()
   await c.env.DB.prepare(
     `INSERT OR REPLACE INTO chunk_jobs 
-     (task_id, chunk_index, start_ms, end_ms, mime_type, size_bytes, attempts, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 'queued', ?, ?)`
-  ).bind(taskId, chunkIndex, startMs, endMs, audio.type || 'audio/webm', audio.size, now, now).run()
+     (task_id, chunk_index, start_ms, end_ms, mime_type, r2_key, size_bytes, attempts, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'queued', ?, ?)`
+  ).bind(taskId, chunkIndex, startMs, endMs, audio.type || 'audio/webm', r2Key, audio.size, now, now).run()
 
   await saveChunkState(c.env, taskId, {
     index: chunkIndex,
@@ -657,6 +657,42 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
 })
 
 app.get('/api/healthz', (c) => c.json({ ok: true }))
+
+app.get('/api/test-r2', async (c) => {
+  try {
+    const testKey = 'test.txt'
+    const testData = 'Hello from R2!'
+    
+    // Test write
+    await c.env.AUDIO_CHUNKS.put(testKey, testData)
+    
+    // Test read
+    const object = await c.env.AUDIO_CHUNKS.get(testKey)
+    if (!object) {
+      return c.json({ error: 'Failed to read from R2' }, 500)
+    }
+    
+    const text = await object.text()
+    
+    // Test delete
+    await c.env.AUDIO_CHUNKS.delete(testKey)
+    
+    return c.json({ 
+      success: true, 
+      message: 'R2 is working',
+      readData: text
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    return c.json({ 
+      success: false,
+      error: errorMessage,
+      stack: errorStack
+    }, 500)
+  }
+})
 
 app.get('/api/tasks', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
