@@ -1,5 +1,5 @@
 const defaultConfig = Object.freeze({
-  chunkSizeBytes: 1 * 1024 * 1024,
+  chunkSizeBytes: 2 * 1024 * 1024,
   overlapSeconds: 5,
   uploadConcurrency: 5, // ブラウザ→サーバーへの並列アップロード数（サーバー側はキューイングのみで負荷小）
   statusHistoryLimit: 120
