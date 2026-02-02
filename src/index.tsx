@@ -562,17 +562,20 @@ app.get('/api/tasks', async (c) => {
   const prefix = 'task:'
   
   try {
-    const list = await c.env.TASKS_KV.list({ prefix, limit })
+    const list = await c.env.TASKS_KV.list({ prefix, limit: 1000 })
     const tasks: TaskRecord[] = []
     
     for (const key of list.keys) {
-      // Only get main task records, not chunk/transcript/minutes records
-      if (key.name.includes(':')) continue
+      // Only get main task records (task:xxxxx), skip sub-records (task:xxxxx:chunk:0)
+      const colonCount = (key.name.match(/:/g) || []).length
+      if (colonCount > 1) continue
       
       const task = await c.env.TASKS_KV.get<TaskRecord>(key.name, { type: 'json' })
       if (task) {
         tasks.push(task)
       }
+      
+      if (tasks.length >= limit) break
     }
     
     // Sort by creation date (newest first)
