@@ -58,9 +58,13 @@ Cloudflare Pages + Workers (Hono)
 
 ## デプロイ状況
 - **本番**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
-- **最新デプロイ ID**: `2f9a243d-9049-490f-8fe0-bcad7cd21c08`（2026-02-02 01:58 UTC）
+- **最新デプロイ ID**: `01134ad1`（2026-02-02 03:15 UTC）
 - **ステータス**: ✅ 稼働中
-- **メモ**: `__STATIC_CONTENT_MANIFEST` 未定義エラーは `hono/cloudflare-pages` アダプター利用と再ビルド済み。Gemini API 呼び出しのリトライ/タイムアウト、サーバーログ可視化、チャンクサイズ最適化（約1MB）とキュー並列処理（最大4並列）を反映。
+- **最近の改善**: 
+  - `waitUntil()` タイムアウト問題を修正（maxIterations=2 に制限）
+  - Cloudflare Workers の実行時間制限を回避
+  - クライアント側の自動ポーリングと `/process` エンドポイントで残チャンクを処理
+  - 大容量音声ファイルの処理安定性を向上
 
 ## フロントエンドフロー
 1. 音声録音またはファイル選択。
