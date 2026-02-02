@@ -314,11 +314,12 @@ app.post('/api/tasks/:taskId/process', async (c) => {
 })
 
 app.post('/api/tasks/:taskId/chunks', async (c) => {
-  const taskId = c.req.param('taskId')
-  const task = await getTask(c.env, taskId)
-  if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
-  }
+  try {
+    const taskId = c.req.param('taskId')
+    const task = await getTask(c.env, taskId)
+    if (!task) {
+      return c.json({ error: 'Task not found' }, 404)
+    }
 
   const formData = await c.req.formData().catch(() => null)
   if (!formData) {
@@ -420,6 +421,25 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
     r2Key,
     queuedAt: now
   }, 202)
+  } catch (error) {
+    console.error('[POST /api/tasks/:taskId/chunks] Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    await appendTaskLog(c.env, c.req.param('taskId'), {
+      level: 'error',
+      message: 'Chunk upload failed',
+      context: {
+        error: errorMessage,
+        stack: errorStack
+      }
+    }).catch(console.error)
+    
+    return c.json({ 
+      error: 'Failed to process chunk upload',
+      details: errorMessage
+    }, 500)
+  }
 })
 
 app.post('/api/tasks/:taskId/merge', async (c) => {
