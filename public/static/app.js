@@ -45,7 +45,9 @@ const elements = {
   copyTranscript: document.getElementById('copy-transcript'),
   copyMinutes: document.getElementById('copy-minutes'),
   triggerReprocess: document.getElementById('trigger-reprocess'),
-  retryMerge: document.getElementById('retry-merge')
+  retryMerge: document.getElementById('retry-merge'),
+  refreshHistory: document.getElementById('refresh-history'),
+  taskHistoryContainer: document.getElementById('task-history-container')
 }
 
 const state = {
@@ -205,8 +207,10 @@ if (elements.retryMerge) {
 elements.recordStart.addEventListener('click', startRecording)
 elements.recordStop.addEventListener('click', stopRecording)
 elements.clearAudio.addEventListener('click', clearAudioPlayer)
+elements.refreshHistory.addEventListener('click', loadTaskHistory)
 
 setupDragAndDrop()
+loadTaskHistory()
 
 async function startRecording() {
   if (state.mediaRecorder || state.isProcessing) return
@@ -1229,4 +1233,155 @@ function clearAudioPlayer() {
   elements.startProcessing.disabled = true
   
   logStatus('録音データを削除しました。')
+}
+
+async function loadTaskHistory() {
+  if (!elements.taskHistoryContainer) return
+  
+  elements.taskHistoryContainer.innerHTML = '<div class="text-center text-sm text-slate-500 py-8">履歴を読み込んでいます...</div>'
+  
+  try {
+    const response = await fetch('/api/tasks?limit=20')
+    if (!response.ok) {
+      throw new Error('Failed to fetch task history')
+    }
+    
+    const data = await response.json()
+    const tasks = data.tasks || []
+    
+    if (tasks.length === 0) {
+      elements.taskHistoryContainer.innerHTML = '<div class="text-center text-sm text-slate-500 py-8">タスク履歴がありません</div>'
+      return
+    }
+    
+    const historyHTML = tasks.map(task => createTaskHistoryItem(task)).join('')
+    elements.taskHistoryContainer.innerHTML = historyHTML
+    
+    // Add click event listeners to each task item
+    tasks.forEach(task => {
+      const element = document.getElementById(`task-${task.id}`)
+      if (element) {
+        element.addEventListener('click', () => loadTaskDetails(task.id))
+      }
+    })
+  } catch (error) {
+    console.error('Failed to load task history:', error)
+    elements.taskHistoryContainer.innerHTML = '<div class="text-center text-sm text-red-500 py-8">履歴の読み込みに失敗しました</div>'
+  }
+}
+
+function createTaskHistoryItem(task) {
+  const statusBadge = getTaskStatusBadge(task.status)
+  const createdDate = new Date(task.createdAt).toLocaleString('ja-JP')
+  const duration = task.durationMs ? formatDuration(task.durationMs) : '不明'
+  
+  return `
+    <div id="task-${task.id}" class="cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition hover:border-indigo-300 hover:shadow-md">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex-1 space-y-2">
+          <div class="flex items-center gap-2">
+            <h4 class="font-medium text-slate-900">${task.filename || 'ファイル名なし'}</h4>
+            ${statusBadge}
+          </div>
+          <div class="text-xs text-slate-500 space-y-1">
+            <div>タスクID: ${task.id}</div>
+            <div>作成日時: ${createdDate}</div>
+            <div>チャンク数: ${task.totalChunks} / 処理済み: ${task.processedChunks}</div>
+            ${duration !== '不明' ? `<div>音声長: ${duration}</div>` : ''}
+          </div>
+        </div>
+        <div class="text-right">
+          <button class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+            詳細を表示 →
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+function getTaskStatusBadge(status) {
+  const badges = {
+    initialized: '<span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">初期化済み</span>',
+    transcribing: '<span class="inline-flex items-center rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">文字起こし中</span>',
+    transcribed: '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">文字起こし完了</span>',
+    summarizing: '<span class="inline-flex items-center rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-700">議事録生成中</span>',
+    completed: '<span class="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700">完了</span>',
+    error: '<span class="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700">エラー</span>'
+  }
+  return badges[status] || badges.initialized
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  
+  if (hours > 0) {
+    return `${hours}時間${minutes}分${seconds}秒`
+  } else if (minutes > 0) {
+    return `${minutes}分${seconds}秒`
+  } else {
+    return `${seconds}秒`
+  }
+}
+
+async function loadTaskDetails(taskId) {
+  try {
+    // Scroll to results section
+    document.querySelector('section:nth-of-type(3)')?.scrollIntoView({ behavior: 'smooth' })
+    
+    logStatus(`タスク ${taskId} の詳細を読み込んでいます...`)
+    
+    // Set current task ID
+    state.taskId = taskId
+    
+    // Fetch task status
+    const statusResponse = await fetch(`/api/tasks/${taskId}/status`)
+    if (!statusResponse.ok) {
+      throw new Error('Failed to fetch task status')
+    }
+    
+    const statusData = await statusResponse.json()
+    logResponse(statusData)
+    
+    // Update UI with task data
+    if (statusData.task) {
+      const task = statusData.task
+      elements.progressSummary.textContent = `${task.status} - ${task.processedChunks}/${task.totalChunks} チャンク処理済み`
+      
+      const progress = task.totalChunks > 0 ? (task.processedChunks / task.totalChunks) * 100 : 0
+      elements.progressBar.style.width = `${progress}%`
+    }
+    
+    // Load transcript if available
+    if (statusData.hasTranscript) {
+      const transcriptResponse = await fetch(`/api/tasks/${taskId}/transcript`)
+      if (transcriptResponse.ok) {
+        const transcriptData = await transcriptResponse.json()
+        state.transcript = transcriptData.transcript || ''
+        updateResultPanels()
+        toggleResultButtons(true)
+      }
+    }
+    
+    // Load minutes if available
+    if (statusData.hasMinutes) {
+      const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
+      if (minutesResponse.ok) {
+        const minutesData = await minutesResponse.json()
+        state.minutes = minutesData.minutes || ''
+        updateResultPanels()
+      }
+    }
+    
+    // Load server logs
+    await fetchTaskLogs(taskId)
+    
+    logStatus(`タスク ${taskId} を読み込みました`)
+  } catch (error) {
+    console.error('Failed to load task details:', error)
+    logStatus(`タスクの読み込みに失敗しました: ${error.message}`, 'error')
+  }
 }

@@ -557,6 +557,34 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
 
 app.get('/api/healthz', (c) => c.json({ ok: true }))
 
+app.get('/api/tasks', async (c) => {
+  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
+  const prefix = 'task:'
+  
+  try {
+    const list = await c.env.TASKS_KV.list({ prefix, limit })
+    const tasks: TaskRecord[] = []
+    
+    for (const key of list.keys) {
+      // Only get main task records, not chunk/transcript/minutes records
+      if (key.name.includes(':')) continue
+      
+      const task = await c.env.TASKS_KV.get<TaskRecord>(key.name, { type: 'json' })
+      if (task) {
+        tasks.push(task)
+      }
+    }
+    
+    // Sort by creation date (newest first)
+    tasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    
+    return c.json({ tasks })
+  } catch (error) {
+    console.error('Failed to fetch tasks:', error)
+    return c.json({ error: 'Failed to fetch tasks' }, 500)
+  }
+})
+
 export default app
 
 function taskKey(taskId: string) {
