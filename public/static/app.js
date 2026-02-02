@@ -614,6 +614,13 @@ function handleQueueStallDetection(summary) {
   
   // Only count as stalled if no progress was made
   if (queued > 0 || processing > 0) {
+    // If this is the first check (digest is empty), just initialize it
+    if (state.lastChunkSummaryDigest === '') {
+      state.lastChunkSummaryDigest = currentDigest
+      state.queueStalledCount = 0
+      return
+    }
+    
     if (currentDigest === state.lastChunkSummaryDigest) {
       // No progress since last check
       state.queueStalledCount += 1
