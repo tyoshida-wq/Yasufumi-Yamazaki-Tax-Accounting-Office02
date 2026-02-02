@@ -76,7 +76,7 @@
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 class="text-xl font-semibold">2. 文字起こしを実行</h2>
-            <p class="text-sm text-slate-500">5MBごとに分割し、5秒ずつ重ねてGemini 3.0 Flash Previewでタイムスタンプ付き文字起こしを行います。</p>
+            <p class="text-sm text-slate-500">約1MBごとに分割し、5秒ずつ重ねてGemini 3.0 Flash Previewのキューに投入、複数チャンクを並列でタイムスタンプ付き文字起こしします。</p>
           </div>
           <button id="start-processing" class="btn-primary" disabled>文字起こしを開始</button>
         </div>
@@ -95,7 +95,7 @@
           <div class="mt-4 h-2 rounded-full bg-slate-200">
             <div id="progress-bar" class="h-2 rounded-full bg-indigo-500 transition-all" style="width: 0%"></div>
           </div>
-          <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <div>
               <h4 class="font-medium text-sm text-slate-600">ステータス</h4>
               <pre id="status-log" class="log-panel"></pre>
@@ -103,6 +103,10 @@
             <div>
               <h4 class="font-medium text-sm text-slate-600">最新レスポンス</h4>
               <pre id="response-log" class="log-panel"></pre>
+            </div>
+            <div>
+              <h4 class="font-medium text-sm text-slate-600">サーバーログ</h4>
+              <pre id="server-log" class="log-panel">サーバーログはまだありません。</pre>
             </div>
           </div>
         </div>
@@ -144,8 +148,8 @@
       <section class="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
         <h2 class="text-lg font-semibold text-slate-700">利用ガイドと注意事項</h2>
         <ul class="mt-4 space-y-3 text-sm text-slate-600">
-          <li>・音声はフロントエンドで約5MBごとに分割し、チャンク間に5秒のオーバーラップを持たせます。</li>
-          <li>・サーバーサイドではGemini 3.0 Flash Previewにチャンクを順次送信し、タイムスタンプ付き文字起こしを取得します。</li>
+          <li>・音声はフロントエンドで約1MBごとに分割し、チャンク間に5秒のオーバーラップを持たせます。</li>
+          <li>・サーバーサイドではGemini 3.0 Flash Previewにチャンクをキューイングし、最大4並列でタイムスタンプ付き文字起こしを取得します。</li>
           <li>・全文結合後、必要に応じて「議事録生成」ボタンからGemini 3.0 Pro Previewを呼び出します。</li>
           <li>・Gemini APIキーはCloudflare WorkersのSecretに設定してください。</li>
           <li>・長時間音声の場合はブラウザメモリ使用量が増えるため、十分なスペックの端末をご利用ください。</li>

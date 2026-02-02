@@ -1,7 +1,19 @@
-const CHUNK_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
-const OVERLAP_SECONDS = 5
+const defaultConfig = Object.freeze({
+  chunkSizeBytes: 1 * 1024 * 1024,
+  overlapSeconds: 5,
+  uploadConcurrency: 3,
+  statusHistoryLimit: 120
+})
+
+const runtimeConfig = {
+  chunkSizeBytes: defaultConfig.chunkSizeBytes,
+  overlapSeconds: defaultConfig.overlapSeconds,
+  uploadConcurrency: defaultConfig.uploadConcurrency,
+  statusHistoryLimit: defaultConfig.statusHistoryLimit
+}
+
 const MAX_DURATION_MS = 3 * 60 * 60 * 1000 // 3 hours
-const STATUS_HISTORY_LIMIT = 120
+const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 
 const elements = {
   recordStart: document.getElementById('record-start'),
@@ -15,6 +27,7 @@ const elements = {
   progressBar: document.getElementById('progress-bar'),
   statusLog: document.getElementById('status-log'),
   responseLog: document.getElementById('response-log'),
+  serverLog: document.getElementById('server-log'),
   chunkInfo: document.getElementById('chunk-info'),
   generateMinutes: document.getElementById('generate-minutes'),
   downloadTranscript: document.getElementById('download-transcript'),
@@ -41,6 +54,74 @@ const state = {
   statusHistory: []
 }
 
+async function loadRuntimeConfig() {
+  try {
+    const response = await fetch('/api/config')
+    if (!response.ok) {
+      return
+    }
+    const data = await response.json()
+    updateRuntimeConfigFromServer(data)
+  } catch (error) {
+    console.warn('設定の取得に失敗しました', error)
+  } finally {
+    applyRuntimeConfigToUI()
+  }
+}
+
+function updateRuntimeConfigFromServer(data) {
+  if (!data || typeof data !== 'object') return
+
+  if (isFiniteNumber(data.chunkSizeBytes)) {
+    runtimeConfig.chunkSizeBytes = clampConfigNumber(data.chunkSizeBytes, 128 * 1024, 8 * 1024 * 1024)
+  }
+  if (isFiniteNumber(data.overlapSeconds)) {
+    runtimeConfig.overlapSeconds = clampConfigNumber(data.overlapSeconds, 0, 30)
+  }
+
+  let desiredUploadConcurrency = runtimeConfig.uploadConcurrency
+  if (isFiniteNumber(data.uploadConcurrency)) {
+    desiredUploadConcurrency = clampConfigNumber(data.uploadConcurrency, 1, 8)
+  }
+  if (isFiniteNumber(data.transcriptionConcurrency)) {
+    const transcriptionConcurrency = clampConfigNumber(data.transcriptionConcurrency, 1, 8)
+    desiredUploadConcurrency = Math.min(desiredUploadConcurrency, transcriptionConcurrency)
+  }
+  runtimeConfig.uploadConcurrency = desiredUploadConcurrency
+
+  if (isFiniteNumber(data.statusHistoryLimit)) {
+    runtimeConfig.statusHistoryLimit = clampConfigNumber(data.statusHistoryLimit, 20, 500)
+  }
+}
+
+function applyRuntimeConfigToUI() {
+  if (elements.chunkInfo) {
+    elements.chunkInfo.textContent = getChunkInfoText()
+  }
+}
+
+function getConfig() {
+  return runtimeConfig
+}
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function clampConfigNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min
+  if (value < min) return min
+  if (value > max) return max
+  return Math.floor(value)
+}
+
+if (elements.serverLog) {
+  elements.serverLog.textContent = SERVER_LOG_EMPTY_TEXT
+}
+
+applyRuntimeConfigToUI()
+void loadRuntimeConfig()
+
 elements.fileInput.addEventListener('change', (event) => {
   const file = event.target.files?.[0]
   if (file) {
@@ -61,6 +142,9 @@ elements.generateMinutes.addEventListener('click', async () => {
     const message = error instanceof Error ? error.message : '議事録生成時にエラーが発生しました'
     logStatus(message, 'error')
     console.error(error)
+    if (state.taskId) {
+      await fetchTaskLogs(state.taskId)
+    }
   }
 })
 
@@ -185,7 +269,7 @@ function setSelectedFile(file, source) {
   state.selectedFile = file
   state.selectedSource = source
   elements.startProcessing.disabled = false
-  elements.chunkInfo.textContent = `${(CHUNK_SIZE_BYTES / (1024 * 1024)).toFixed(1)}MB / チャンク`
+  elements.chunkInfo.textContent = getChunkInfoText()
   const summaryLines = [
     `ソース: ${source}`,
     `ファイル名: ${file.name}`,
@@ -216,7 +300,7 @@ async function processAudioFile(file) {
 
     const plan = planChunks(file, durationMs)
     state.totalChunks = plan.chunks.length
-    elements.chunkInfo.textContent = `${formatBytes(CHUNK_SIZE_BYTES)} / チャンク、重複 ${OVERLAP_SECONDS}秒`
+    elements.chunkInfo.textContent = getChunkInfoText()
     logStatus(`音声を${state.totalChunks}チャンクに分割します。`) 
 
     const task = await createTask({
@@ -226,17 +310,34 @@ async function processAudioFile(file) {
     })
 
     state.taskId = task.id
-    logStatus(`タスク ${state.taskId} を作成しました。`) 
+    logStatus(`タスク ${state.taskId} を作成しました。`)
+    await fetchTaskLogs(state.taskId)
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
 
-    for (const chunk of plan.chunks) {
-      await uploadChunk(state.taskId, chunk)
-      const status = await fetchTaskStatus(state.taskId)
-      updateProgress(status.task.processedChunks, status.task.totalChunks)
+    let nextChunkIndex = 0
+    const uploadConcurrency = Math.max(1, getConfig().uploadConcurrency || 1)
+    const uploadWorkers = Math.max(1, Math.min(uploadConcurrency, plan.chunks.length))
+
+    const runUploadWorker = async () => {
+      while (true) {
+        const currentIndex = nextChunkIndex++
+        if (currentIndex >= plan.chunks.length) {
+          break
+        }
+        const chunk = plan.chunks[currentIndex]
+        await uploadChunk(state.taskId, chunk)
+        const status = await fetchTaskStatus(state.taskId)
+        if (status && status.task) {
+          updateProgress(status.task.processedChunks, status.task.totalChunks, status.chunkSummary)
+        }
+      }
     }
+
+    await Promise.all(Array.from({ length: uploadWorkers }, () => runUploadWorker()))
 
     logStatus('全チャンクの送信が完了しました。サーバーで結合します。')
     const merged = await mergeTranscript(state.taskId)
+    await fetchTaskLogs(state.taskId)
 
     state.transcript = merged.transcript
     updateResultPanels()
@@ -248,6 +349,9 @@ async function processAudioFile(file) {
     console.error(error)
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました'
     logStatus(`処理中にエラー: ${message}`, 'error')
+    if (state.taskId) {
+      await fetchTaskLogs(state.taskId)
+    }
   } finally {
     state.isProcessing = false
     elements.startProcessing.disabled = false
@@ -255,16 +359,19 @@ async function processAudioFile(file) {
 }
 
 function planChunks(file, durationMs) {
+  const config = getConfig()
+  const chunkSizeBytes = config.chunkSizeBytes
+  const overlapSeconds = config.overlapSeconds
   const bytesPerMs = file.size / durationMs
-  const overlapBytes = Math.round(bytesPerMs * OVERLAP_SECONDS * 1000)
+  const overlapBytes = Math.round(bytesPerMs * overlapSeconds * 1000)
   const chunks = []
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE_BYTES)
+  const totalChunks = Math.ceil(file.size / chunkSizeBytes)
 
   const extension = detectExtension(file)
 
   for (let index = 0; index < totalChunks; index++) {
-    const uniqueStartByte = index * CHUNK_SIZE_BYTES
-    const uniqueEndByte = Math.min(file.size, (index + 1) * CHUNK_SIZE_BYTES)
+    const uniqueStartByte = index * chunkSizeBytes
+    const uniqueEndByte = Math.min(file.size, (index + 1) * chunkSizeBytes)
     const chunkStartByte = index === 0 ? 0 : Math.max(0, uniqueStartByte - overlapBytes)
     const chunkEndByte = uniqueEndByte
 
@@ -325,10 +432,25 @@ async function uploadChunk(taskId, chunk) {
 
 async function fetchTaskStatus(taskId) {
   const response = await fetch(`/api/tasks/${taskId}/status`)
-  const data = await response.json()
-  if (!response.ok) {
-    throw new Error(data?.error || 'ステータスの取得に失敗しました')
+  let data
+  try {
+    data = await response.json()
+  } catch (error) {
+    console.warn('Failed to parse status response', error)
+    throw new Error('ステータスの取得に失敗しました')
   }
+
+  if (!response.ok) {
+    const message = data?.error || 'ステータスの取得に失敗しました'
+    throw new Error(message)
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('ステータスの取得に失敗しました')
+  }
+
+  const logs = Array.isArray(data.logs) ? data.logs : []
+  updateServerLog(logs)
   return data
 }
 
@@ -361,19 +483,30 @@ async function generateMinutes() {
   updateResultPanels()
   toggleMinutesButtons(true)
   logStatus('議事録の生成が完了しました。')
+  await fetchTaskLogs(state.taskId)
 }
 
-function updateProgress(processed, total) {
-  const percent = total === 0 ? 0 : Math.round((processed / total) * 100)
+function updateProgress(processed, total, summary) {
+  const safeTotal = Math.max(total, 0)
+  const percent = safeTotal === 0 ? 0 : Math.round((processed / safeTotal) * 100)
   elements.progressBar.style.width = `${percent}%`
-  elements.progressSummary.textContent = `進捗: ${processed} / ${total} チャンク (${percent}%)`
+  let summaryText = `進捗: ${processed} / ${safeTotal} チャンク (${percent}%)`
+  if (summary && typeof summary === 'object') {
+    const queued = summary.queued ?? 0
+    const processing = summary.processing ?? 0
+    const completed = summary.completed ?? 0
+    const error = summary.error ?? 0
+    summaryText += ` ｜ 待機 ${queued}・処理中 ${processing}・完了 ${completed}・エラー ${error}`
+  }
+  elements.progressSummary.textContent = summaryText
 }
 
 function logStatus(message, level = 'info') {
   const timestamp = new Date().toLocaleTimeString('ja-JP', { hour12: false })
   const line = `[${timestamp}] ${message}`
   state.statusHistory.push({ message: line, level })
-  if (state.statusHistory.length > STATUS_HISTORY_LIMIT) {
+  const historyLimit = getConfig().statusHistoryLimit || defaultConfig.statusHistoryLimit
+  if (state.statusHistory.length > historyLimit) {
     state.statusHistory.shift()
   }
   elements.statusLog.textContent = state.statusHistory.map((entry) => entry.message).join('\n')
@@ -388,6 +521,61 @@ function logStatus(message, level = 'info') {
 function logResponse(data) {
   const summarized = JSON.stringify(data, null, 2)
   elements.responseLog.textContent = summarized
+}
+
+function updateServerLog(entries) {
+  if (!elements.serverLog) return
+  if (!Array.isArray(entries) || entries.length === 0) {
+    elements.serverLog.textContent = SERVER_LOG_EMPTY_TEXT
+    return
+  }
+  const lines = entries
+    .map((entry) => formatServerLogLine(entry))
+    .filter((line) => line.length > 0)
+  elements.serverLog.textContent = lines.length > 0 ? lines.join('\n') : SERVER_LOG_EMPTY_TEXT
+}
+
+function formatServerLogLine(entry) {
+  if (!entry || typeof entry !== 'object') return ''
+  const time = formatServerLogTimestamp(entry.timestamp)
+  const level = typeof entry.level === 'string' ? entry.level.toUpperCase() : 'INFO'
+  const message = typeof entry.message === 'string' ? entry.message : ''
+  let contextText = ''
+  if (entry.context && typeof entry.context === 'object') {
+    try {
+      const json = JSON.stringify(entry.context)
+      if (json && json !== '{}') {
+        contextText = ` ${truncate(json, 160)}`
+      }
+    } catch (error) {
+      console.warn('Failed to stringify server log context', error)
+    }
+  }
+  return `[${time}] (${level}) ${message}${contextText}`
+}
+
+function formatServerLogTimestamp(value) {
+  if (typeof value !== 'string') return '--:--:--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleTimeString('ja-JP', { hour12: false })
+}
+
+async function fetchTaskLogs(taskId) {
+  if (!taskId) return
+  try {
+    const response = await fetch(`/api/tasks/${taskId}/logs?limit=60`)
+    if (!response.ok) {
+      if (response.status !== 404) {
+        console.warn('Failed to fetch task logs', response.status)
+      }
+      return
+    }
+    const data = await response.json()
+    updateServerLog(Array.isArray(data.logs) ? data.logs : [])
+  } catch (error) {
+    console.warn('Failed to fetch task logs', error)
+  }
 }
 
 function updateResultPanels() {
@@ -449,6 +637,18 @@ function formatBytes(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   const value = bytes / Math.pow(k, i)
   return `${value.toFixed(2)} ${sizes[i]}`
+}
+
+function getChunkInfoText() {
+  const config = getConfig()
+  return `${formatBytes(config.chunkSizeBytes)} / チャンク、重複 ${config.overlapSeconds}秒`
+}
+
+function truncate(value, max = 160) {
+  if (typeof value !== 'string') {
+    value = String(value ?? '')
+  }
+  return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
 function downloadText(content, filename) {

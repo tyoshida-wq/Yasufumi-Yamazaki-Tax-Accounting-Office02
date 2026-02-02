@@ -3,9 +3,6 @@
   "name": "yasufumi-yamazaki-tax-accounting-office02",
   "compatibility_date": "2026-02-02",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
   "kv_namespaces": [
     {
       "binding": "TASKS_KV",
