@@ -15,9 +15,9 @@ const runtimeConfig = {
 const MAX_DURATION_MS = 3 * 60 * 60 * 1000 // 3 hours
 const SERVER_LOG_EMPTY_TEXT = 'サーバーログはまだありません。'
 const STATUS_POLL_INTERVAL_MS = 6000
-const MERGE_READY_TIMEOUT_MS = 120_000
+const MERGE_READY_TIMEOUT_MS = 20 * 60 * 1000  // 20 minutes (36 chunks × 60s ÷ 2 = 18 min + buffer)
 const MERGE_RETRY_DELAY_MS = 6000
-const AUTO_REPROCESS_THRESHOLD = 20  // 20 checks × 6s = 120s (2 minutes)
+const AUTO_REPROCESS_THRESHOLD = 60  // 60 checks × 6s = 360s (6 minutes)
 
 const elements = {
   recordStart: document.getElementById('record-start'),
