@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { serveStatic } from 'hono/cloudflare-pages'
 
 const GEMINI_FLASH_MODEL = 'gemini-3-flash-preview'
 const GEMINI_PRO_MODEL = 'gemini-3-pro-preview'
@@ -29,6 +28,7 @@ interface Bindings {
   DB: D1Database
   AUDIO_CHUNKS: R2Bucket
   TRANSCRIPTION_QUEUE: Queue<ChunkJobMessage>
+  ASSETS: Fetcher
   CHUNK_SIZE_BYTES?: string
   CHUNK_OVERLAP_SECONDS?: string
   TRANSCRIPTION_MAX_CONCURRENCY?: string
@@ -150,9 +150,19 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/api/*', cors())
 
-app.use('/static/*', serveStatic({ root: './public' }))
-app.get('/', serveStatic({ path: './public/index.html' }))
-app.get('/favicon.ico', serveStatic({ path: './public/favicon.ico' }))
+// Serve static files from Assets
+app.get('/static/*', async (c) => {
+  const url = new URL(c.req.url)
+  return c.env.ASSETS.fetch(url)
+})
+
+app.get('/', async (c) => {
+  return c.env.ASSETS.fetch(new URL('/index.html', c.req.url))
+})
+
+app.get('/favicon.ico', async (c) => {
+  return c.env.ASSETS.fetch(new URL('/favicon.ico', c.req.url))
+})
 
 app.get('/api/config', (c) => {
   const config = getRuntimeConfig(c.env)

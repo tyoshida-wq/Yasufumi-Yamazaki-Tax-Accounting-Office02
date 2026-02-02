@@ -3,6 +3,11 @@ main = "src/index.tsx"
 compatibility_date = "2026-02-02"
 compatibility_flags = ["nodejs_compat"]
 
+# Static assets directory
+[assets]
+directory = "public"
+binding = "ASSETS"
+
 # D1 Database
 [[d1_databases]]
 binding = "DB"
