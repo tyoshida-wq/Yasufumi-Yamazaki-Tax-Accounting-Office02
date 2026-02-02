@@ -25,6 +25,9 @@ const elements = {
   recordStatus: document.getElementById('record-status'),
   recordTimer: document.getElementById('record-timer'),
   waveformCanvas: document.getElementById('waveform-canvas'),
+  audioPlayer: document.getElementById('audio-player'),
+  audioPlayerContainer: document.getElementById('audio-player-container'),
+  clearAudio: document.getElementById('clear-audio'),
   fileInput: document.getElementById('file-input'),
   fileSummary: document.getElementById('file-summary'),
   startProcessing: document.getElementById('start-processing'),
@@ -201,6 +204,7 @@ if (elements.retryMerge) {
 
 elements.recordStart.addEventListener('click', startRecording)
 elements.recordStop.addEventListener('click', stopRecording)
+elements.clearAudio.addEventListener('click', clearAudioPlayer)
 
 setupDragAndDrop()
 
@@ -246,6 +250,10 @@ async function startRecording() {
       }
       const filename = `recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`
       const file = new File([blob], filename, { type: blob.type })
+      
+      // Show audio player with recorded audio
+      showAudioPlayer(blob)
+      
       setSelectedFile(file, 'ブラウザ録音')
       logStatus(`録音が完了しました（${formatBytes(file.size)}）。文字起こしを開始できます。`)
       resetRecordingControls()
@@ -324,6 +332,11 @@ function setSelectedFile(file, source) {
     `形式: ${file.type || '不明'}`
   ]
   elements.fileSummary.textContent = summaryLines.join('\n')
+  
+  // Show audio player for uploaded/recorded file
+  if (file && (file.type.startsWith('audio/') || source === 'ブラウザ録音')) {
+    showAudioPlayer(file)
+  }
 }
 
 async function processAudioFile(file) {
@@ -1176,4 +1189,44 @@ function clearWaveformCanvas() {
   const canvasCtx = canvas.getContext('2d')
   canvasCtx.fillStyle = 'rgb(255, 255, 255)'
   canvasCtx.fillRect(0, 0, canvas.width, canvas.height)
+}
+
+function showAudioPlayer(blob) {
+  if (!elements.audioPlayer || !elements.audioPlayerContainer) return
+  
+  // Revoke previous object URL if exists
+  const oldSrc = elements.audioPlayer.src
+  if (oldSrc && oldSrc.startsWith('blob:')) {
+    URL.revokeObjectURL(oldSrc)
+  }
+  
+  // Create new object URL and set to audio player
+  const url = URL.createObjectURL(blob)
+  elements.audioPlayer.src = url
+  elements.audioPlayerContainer.classList.remove('hidden')
+}
+
+function clearAudioPlayer() {
+  if (!elements.audioPlayer || !elements.audioPlayerContainer) return
+  
+  // Pause and reset player
+  elements.audioPlayer.pause()
+  elements.audioPlayer.currentTime = 0
+  
+  // Revoke object URL
+  const oldSrc = elements.audioPlayer.src
+  if (oldSrc && oldSrc.startsWith('blob:')) {
+    URL.revokeObjectURL(oldSrc)
+  }
+  
+  elements.audioPlayer.src = ''
+  elements.audioPlayerContainer.classList.add('hidden')
+  
+  // Clear selected file
+  state.selectedFile = null
+  state.selectedSource = null
+  elements.fileSummary.textContent = '音声ファイルが未選択です。'
+  elements.startProcessing.disabled = true
+  
+  logStatus('録音データを削除しました。')
 }
