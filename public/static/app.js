@@ -1,7 +1,7 @@
 const defaultConfig = Object.freeze({
   chunkSizeBytes: 1 * 1024 * 1024,
   overlapSeconds: 5,
-  uploadConcurrency: 2, // CRITICAL: Force max 2 concurrent uploads to prevent server overload
+  uploadConcurrency: 5, // ブラウザ→サーバーへの並列アップロード数（サーバー側はキューイングのみで負荷小）
   statusHistoryLimit: 120
 })
 
@@ -389,8 +389,8 @@ async function processAudioFile(file) {
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
 
     // Upload all chunks as fast as possible (server will throttle processing)
-    const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 2, 2)) // Force max 2
-    logStatus(`並列アップロード数: ${uploadConcurrency} (サーバー側で処理速度制御)`)
+    const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 5, 5)) // Max 5 concurrent uploads
+    logStatus(`並列アップロード数: ${uploadConcurrency} (ブラウザ→サーバー、Gemini処理は2並列)`)
     
     // Process chunks in strict batches for upload
     for (let i = 0; i < plan.chunks.length; i += uploadConcurrency) {
