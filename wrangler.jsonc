@@ -3,11 +3,11 @@
   "name": "yasufumi-yamazaki-tax-accounting-office02",
   "compatibility_date": "2026-02-02",
   "pages_build_output_dir": "./dist",
-  "kv_namespaces": [
+  "d1_databases": [
     {
-      "binding": "TASKS_KV",
-      "id": "bb3e25a1d35649528218f31c902750e5",
-      "preview_id": "596fa19fee224aaea704ca42ad00fb2b"
+      "binding": "DB",
+      "database_name": "webapp-production",
+      "database_id": "5cabb78a-ece6-4fcd-bdeb-a72c32708fa2"
     }
   ]
 }

@@ -5,8 +5,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "wrangler pages dev",
-    "deploy": "npm run build && wrangler pages deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name yasufumi-yamazaki-tax-accounting-office02",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "db:migrate:local": "wrangler d1 migrations apply webapp-production --local",
+    "db:migrate:prod": "wrangler d1 migrations apply webapp-production",
+    "db:console:local": "wrangler d1 execute webapp-production --local",
+    "db:console:prod": "wrangler d1 execute webapp-production"
   },
   "dependencies": {
     "hono": "^4.11.7"

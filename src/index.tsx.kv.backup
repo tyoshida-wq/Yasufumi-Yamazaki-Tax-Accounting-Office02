@@ -163,24 +163,18 @@ app.post('/api/tasks', async (c) => {
 
   const taskId = crypto.randomUUID()
   const now = new Date().toISOString()
-  const filename = typeof payload.filename === 'string' ? payload.filename : null
-  const durationMs = typeof payload.durationMs === 'number' ? payload.durationMs : null
-  
-  await c.env.DB.prepare(
-    'INSERT INTO tasks (id, filename, total_chunks, processed_chunks, duration_ms, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(taskId, filename, payload.totalChunks, 0, durationMs, 'initialized', now, now).run()
-  
   const task: TaskRecord = {
     id: taskId,
-    filename: filename || undefined,
+    filename: typeof payload.filename === 'string' ? payload.filename : undefined,
     totalChunks: payload.totalChunks,
     processedChunks: 0,
-    durationMs: durationMs || undefined,
+    durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
     status: 'initialized',
     createdAt: now,
     updatedAt: now
   }
-  
+
+  await c.env.TASKS_KV.put(taskKey(taskId), JSON.stringify(task))
   await appendTaskLog(c.env, taskId, {
     level: 'info',
     message: 'Task created',
@@ -201,19 +195,15 @@ app.get('/api/tasks/:taskId/status', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  const transcriptResult = await c.env.DB.prepare(
-    'SELECT task_id FROM transcripts WHERE task_id = ?'
-  ).bind(taskId).first()
-  const minutesResult = await c.env.DB.prepare(
-    'SELECT task_id FROM minutes WHERE task_id = ?'
-  ).bind(taskId).first()
+  const merged = await c.env.TASKS_KV.get(transcriptKey(taskId))
+  const minutes = await c.env.TASKS_KV.get(minutesKey(taskId))
   const logs = await getTaskLogs(c.env, taskId, 40)
   const chunkSummary = await getChunkSummary(c.env, taskId)
 
   return c.json({
     task,
-    hasMergedTranscript: transcriptResult !== null,
-    hasMinutes: minutesResult !== null,
+    hasMergedTranscript: merged !== null,
+    hasMinutes: minutes !== null,
     logs,
     chunkSummary
   })
@@ -431,15 +421,11 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
   for (let i = 0; i < task.totalChunks; i++) {
     const record = await getChunk(c.env, taskId, i)
     if (!record) {
-      // Get existing state from DB
-      const stateResult = await c.env.DB.prepare(
-        'SELECT status, updated_at FROM chunk_states WHERE task_id = ? AND chunk_index = ?'
-      ).bind(taskId, i).first<{ status: ChunkJobStatus, updated_at: string }>()
-      
+      const existingState = (await c.env.TASKS_KV.get(chunkStateKey(taskId, i), { type: 'json' })) as ChunkStateRecord | null
       await saveChunkState(c.env, taskId, {
         index: i,
         status: 'error',
-        attempts: 0,
+        attempts: existingState?.attempts ?? 0,
         updatedAt: new Date().toISOString(),
         lastError: 'Chunk missing before merge'
       })
@@ -461,17 +447,15 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
   }
 
   const merged = mergeChunks(chunkRecords)
-  const now = new Date().toISOString()
-  
-  // Save transcript to D1
-  await c.env.DB.prepare(
-    'INSERT OR REPLACE INTO transcripts (task_id, content, created_at) VALUES (?, ?, ?)'
-  ).bind(taskId, merged, now).run()
+  await c.env.TASKS_KV.put(transcriptKey(taskId), merged)
 
-  // Update task status
-  await c.env.DB.prepare(
-    'UPDATE tasks SET processed_chunks = ?, status = ?, updated_at = ? WHERE id = ?'
-  ).bind(totalChunks, 'transcribed', now, taskId).run()
+  const updatedTask: TaskRecord = {
+    ...task,
+    processedChunks: totalChunks,
+    status: 'transcribed',
+    updatedAt: new Date().toISOString()
+  }
+  await c.env.TASKS_KV.put(taskKey(taskId), JSON.stringify(updatedTask))
   await appendTaskLog(c.env, taskId, {
     level: 'info',
     message: 'Transcript merge completed',
@@ -485,14 +469,11 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
 
 app.get('/api/tasks/:taskId/transcript', async (c) => {
   const taskId = c.req.param('taskId')
-  const result = await c.env.DB.prepare(
-    'SELECT content FROM transcripts WHERE task_id = ?'
-  ).bind(taskId).first<{ content: string }>()
-  
-  if (!result) {
+  const transcript = await c.env.TASKS_KV.get(transcriptKey(taskId))
+  if (!transcript) {
     return c.json({ error: 'Transcript not found' }, 404)
   }
-  return c.json({ transcript: result.content })
+  return c.json({ transcript })
 })
 
 app.post('/api/tasks/:taskId/minutes', async (c) => {
@@ -502,11 +483,8 @@ app.post('/api/tasks/:taskId/minutes', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  const transcriptResult = await c.env.DB.prepare(
-    'SELECT content FROM transcripts WHERE task_id = ?'
-  ).bind(taskId).first<{ content: string }>()
-  
-  if (!transcriptResult) {
+  const transcript = await c.env.TASKS_KV.get(transcriptKey(taskId))
+  if (!transcript) {
     return c.json({ error: 'Transcript is not ready' }, 409)
   }
 
@@ -527,35 +505,32 @@ app.post('/api/tasks/:taskId/minutes', async (c) => {
 
     const minutesContent = await callGeminiMinutes(c.env, taskId, {
       apiKey,
-      transcript: transcriptResult.content,
+      transcript,
       filename: task.filename,
       durationMs: task.durationMs
     })
 
-    const now = new Date().toISOString()
-    
-    // Save minutes to D1
-    await c.env.DB.prepare(
-      'INSERT OR REPLACE INTO minutes (task_id, content, created_at) VALUES (?, ?, ?)'
-    ).bind(taskId, minutesContent, now).run()
+    const record: MinutesRecord = {
+      content: minutesContent,
+      createdAt: new Date().toISOString()
+    }
 
-    // Update task status
-    await c.env.DB.prepare(
-      'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?'
-    ).bind('completed', now, taskId).run()
-    
+    await c.env.TASKS_KV.put(minutesKey(taskId), JSON.stringify(record))
+
+    const updatedTask: TaskRecord = {
+      ...task,
+      status: 'completed',
+      updatedAt: new Date().toISOString()
+    }
+    await c.env.TASKS_KV.put(taskKey(taskId), JSON.stringify(updatedTask))
     await appendTaskLog(c.env, taskId, {
       level: 'info',
       message: 'Minutes generation stored',
       context: {
-        minutesLength: minutesContent.length
+        minutesLength: record.content.length
       }
     })
 
-    const record: MinutesRecord = {
-      content: minutesContent,
-      createdAt: now
-    }
     return c.json({ minutes: record })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
@@ -573,17 +548,9 @@ app.post('/api/tasks/:taskId/minutes', async (c) => {
 
 app.get('/api/tasks/:taskId/minutes', async (c) => {
   const taskId = c.req.param('taskId')
-  const result = await c.env.DB.prepare(
-    'SELECT content, created_at FROM minutes WHERE task_id = ?'
-  ).bind(taskId).first<{ content: string, created_at: string }>()
-  
-  if (!result) {
+  const minutes = await c.env.TASKS_KV.get(minutesKey(taskId), { type: 'json' })
+  if (!minutes) {
     return c.json({ error: 'Minutes not found' }, 404)
-  }
-  
-  const minutes: MinutesRecord = {
-    content: result.content,
-    createdAt: result.created_at
   }
   return c.json(minutes)
 })
@@ -592,37 +559,27 @@ app.get('/api/healthz', (c) => c.json({ ok: true }))
 
 app.get('/api/tasks', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
+  const prefix = 'task:'
   
   try {
-    const results = await c.env.DB.prepare(
-      'SELECT id, filename, total_chunks, processed_chunks, duration_ms, status, error, created_at, updated_at FROM tasks ORDER BY created_at DESC LIMIT ?'
-    ).bind(limit).all<{
-      id: string
-      filename: string | null
-      total_chunks: number
-      processed_chunks: number
-      duration_ms: number | null
-      status: TaskStatus
-      error: string | null
-      created_at: string
-      updated_at: string
-    }>()
+    const list = await c.env.TASKS_KV.list({ prefix, limit: 1000 })
+    const tasks: TaskRecord[] = []
     
-    if (!results.results) {
-      return c.json({ tasks: [] })
+    for (const key of list.keys) {
+      // Only get main task records (task:xxxxx), skip sub-records (task:xxxxx:chunk:0)
+      const colonCount = (key.name.match(/:/g) || []).length
+      if (colonCount > 1) continue
+      
+      const task = await c.env.TASKS_KV.get<TaskRecord>(key.name, { type: 'json' })
+      if (task) {
+        tasks.push(task)
+      }
+      
+      if (tasks.length >= limit) break
     }
     
-    const tasks: TaskRecord[] = results.results.map(row => ({
-      id: row.id,
-      filename: row.filename || undefined,
-      totalChunks: row.total_chunks,
-      processedChunks: row.processed_chunks,
-      durationMs: row.duration_ms || undefined,
-      status: row.status,
-      error: row.error || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }))
+    // Sort by creation date (newest first)
+    tasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     
     return c.json({ tasks })
   } catch (error) {
@@ -632,6 +589,38 @@ app.get('/api/tasks', async (c) => {
 })
 
 export default app
+
+function taskKey(taskId: string) {
+  return `task:${taskId}`
+}
+
+function chunkKey(taskId: string, index: number) {
+  return `task:${taskId}:chunk:${index}`
+}
+
+function chunkJobKey(taskId: string, index: number) {
+  return `task:${taskId}:job:${index}`
+}
+
+function chunkJobPrefix(taskId: string) {
+  return `task:${taskId}:job:`
+}
+
+function chunkStateKey(taskId: string, index: number) {
+  return `task:${taskId}:chunk-state:${index}`
+}
+
+function chunkStatePrefix(taskId: string) {
+  return `task:${taskId}:chunk-state:`
+}
+
+function transcriptKey(taskId: string) {
+  return `task:${taskId}:transcript`
+}
+
+function minutesKey(taskId: string) {
+  return `task:${taskId}:minutes`
+}
 
 function getRuntimeConfig(env: Bindings): RuntimeConfig {
   const chunkSizeBytes = clampNumber(parseInteger(env.CHUNK_SIZE_BYTES, DEFAULT_CHUNK_SIZE_BYTES), 128 * 1024, 8 * 1024 * 1024)
@@ -677,31 +666,10 @@ function sanitizeChunkJobForResponse(job: ChunkJobRecord) {
 }
 
 async function enqueueChunkJob(env: Bindings, taskId: string, input: EnqueueChunkJobInput): Promise<ChunkJobRecord> {
+  const key = chunkJobKey(taskId, input.index)
+  const existing = (await env.TASKS_KV.get(key, { type: 'json' })) as ChunkJobRecord | null
   const now = new Date().toISOString()
-  
-  // Check if job already exists
-  const existing = await env.DB.prepare(
-    'SELECT attempts, created_at FROM chunk_jobs WHERE task_id = ? AND chunk_index = ?'
-  ).bind(taskId, input.index).first<{ attempts: number, created_at: string }>()
-  
-  const attempts = existing?.attempts ?? 0
-  const createdAt = existing?.created_at ?? now
-  
-  // Insert or replace
-  await env.DB.prepare(
-    `INSERT OR REPLACE INTO chunk_jobs 
-     (task_id, chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`
-  ).bind(taskId, input.index, input.startMs, input.endMs, input.mimeType, input.audioBase64, input.sizeBytes, attempts, createdAt, now).run()
-  
-  // Save chunk state
-  await saveChunkState(env, taskId, {
-    index: input.index,
-    status: 'queued',
-    attempts: attempts,
-    updatedAt: now
-  })
-  
+
   const job: ChunkJobRecord = {
     index: input.index,
     startMs: input.startMs,
@@ -709,29 +677,35 @@ async function enqueueChunkJob(env: Bindings, taskId: string, input: EnqueueChun
     mimeType: input.mimeType,
     audioBase64: input.audioBase64,
     sizeBytes: input.sizeBytes,
-    attempts: attempts,
+    attempts: existing?.attempts ?? 0,
     status: 'queued',
-    createdAt: createdAt,
+    createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     lastError: undefined,
     processingBy: undefined,
     retryAt: undefined
   }
-  
+
+  await env.TASKS_KV.put(key, JSON.stringify(job))
+  await saveChunkState(env, taskId, {
+    index: job.index,
+    status: 'queued',
+    attempts: job.attempts,
+    updatedAt: now
+  })
+
   return job
 }
 
 async function ensureTaskTranscribing(env: Bindings, task: TaskRecord): Promise<TaskRecord> {
   if (task.status === 'initialized') {
-    const now = new Date().toISOString()
-    await env.DB.prepare(
-      'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?'
-    ).bind('transcribing', now, task.id).run()
-    return {
+    const updated: TaskRecord = {
       ...task,
       status: 'transcribing',
-      updatedAt: now
+      updatedAt: new Date().toISOString()
     }
+    await env.TASKS_KV.put(taskKey(task.id), JSON.stringify(updated))
+    return updated
   }
   return task
 }
@@ -780,125 +754,64 @@ async function getQueuedChunkJobs(
   limit: number,
   batchLimit: number
 ): Promise<ChunkJobRecord[]> {
+  const jobs: ChunkJobRecord[] = []
+  const prefix = chunkJobPrefix(taskId)
+  let cursor: string | undefined
   const now = Date.now()
-  
-  const results = await env.DB.prepare(
-    `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status, 
-            last_error, processing_by, retry_at, created_at, updated_at
-     FROM chunk_jobs 
-     WHERE task_id = ? AND status = 'queued' AND (retry_at IS NULL OR retry_at <= ?)
-     ORDER BY chunk_index
-     LIMIT ?`
-  ).bind(taskId, new Date(now).toISOString(), limit).all<{
-    chunk_index: number
-    start_ms: number
-    end_ms: number
-    mime_type: string
-    audio_base64: string
-    size_bytes: number
-    attempts: number
-    status: ChunkJobStatus
-    last_error: string | null
-    processing_by: string | null
-    retry_at: string | null
-    created_at: string
-    updated_at: string
-  }>()
-  
-  if (!results.results) return []
-  
-  return results.results.map(row => ({
-    index: row.chunk_index,
-    startMs: row.start_ms,
-    endMs: row.end_ms,
-    mimeType: row.mime_type,
-    audioBase64: row.audio_base64,
-    sizeBytes: row.size_bytes,
-    attempts: row.attempts,
-    status: row.status,
-    lastError: row.last_error || undefined,
-    processingBy: row.processing_by || undefined,
-    retryAt: row.retry_at || undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  }))
+
+  while (jobs.length < limit) {
+    const list = await env.TASKS_KV.list({ prefix, limit: batchLimit, cursor })
+    if (list.keys.length === 0) {
+      if (!list.cursor) {
+        break
+      }
+      cursor = list.cursor
+      continue
+    }
+
+    const fetched = await Promise.all(
+      list.keys.map((entry) => env.TASKS_KV.get(entry.name, { type: 'json' }) as Promise<ChunkJobRecord | null>)
+    )
+
+    for (const job of fetched) {
+      if (!job) continue
+      if (job.status !== 'queued') continue
+      if (job.retryAt && Date.parse(job.retryAt) > now) continue
+      jobs.push(job)
+      if (jobs.length >= limit) {
+        break
+      }
+    }
+
+    if (list.list_complete || !list.cursor) {
+      break
+    }
+    cursor = list.cursor
+  }
+
+  return jobs.sort((a, b) => a.index - b.index).slice(0, limit)
 }
 
 async function claimChunkJob(env: Bindings, taskId: string, index: number, workerId: string): Promise<ChunkJobRecord | null> {
-  const now = new Date().toISOString()
-  const nowMs = Date.now()
-  
-  // Check if job is available
-  const job = await env.DB.prepare(
-    `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status,
-            last_error, processing_by, retry_at, created_at, updated_at
-     FROM chunk_jobs
-     WHERE task_id = ? AND chunk_index = ? AND status = 'queued'`
-  ).bind(taskId, index).first<{
-    chunk_index: number
-    start_ms: number
-    end_ms: number
-    mime_type: string
-    audio_base64: string
-    size_bytes: number
-    attempts: number
-    status: ChunkJobStatus
-    last_error: string | null
-    processing_by: string | null
-    retry_at: string | null
-    created_at: string
-    updated_at: string
-  }>()
-  
+  const key = chunkJobKey(taskId, index)
+  const job = (await env.TASKS_KV.get(key, { type: 'json' })) as ChunkJobRecord | null
   if (!job) return null
-  if (job.retry_at && Date.parse(job.retry_at) > nowMs) return null
-  
-  // Claim the job
-  await env.DB.prepare(
-    'UPDATE chunk_jobs SET status = ?, processing_by = ?, updated_at = ? WHERE task_id = ? AND chunk_index = ? AND status = \'queued\''
-  ).bind('processing', workerId, now, taskId, index).run()
-  
-  // Verify claim
-  const confirmed = await env.DB.prepare(
-    `SELECT chunk_index, start_ms, end_ms, mime_type, audio_base64, size_bytes, attempts, status,
-            last_error, processing_by, retry_at, created_at, updated_at
-     FROM chunk_jobs
-     WHERE task_id = ? AND chunk_index = ?`
-  ).bind(taskId, index).first<{
-    chunk_index: number
-    start_ms: number
-    end_ms: number
-    mime_type: string
-    audio_base64: string
-    size_bytes: number
-    attempts: number
-    status: ChunkJobStatus
-    last_error: string | null
-    processing_by: string | null
-    retry_at: string | null
-    created_at: string
-    updated_at: string
-  }>()
-  
-  if (!confirmed || confirmed.processing_by !== workerId || confirmed.status !== 'processing') {
+  if (job.status !== 'queued') return null
+  if (job.retryAt && Date.parse(job.retryAt) > Date.now()) return null
+
+  const now = new Date().toISOString()
+  const updated: ChunkJobRecord = {
+    ...job,
+    status: 'processing',
+    processingBy: workerId,
+    updatedAt: now
+  }
+  await env.TASKS_KV.put(key, JSON.stringify(updated))
+  const confirmed = (await env.TASKS_KV.get(key, { type: 'json' })) as ChunkJobRecord | null
+  if (!confirmed || confirmed.processingBy !== workerId || confirmed.status !== 'processing') {
     return null
   }
-  
-  return {
-    index: confirmed.chunk_index,
-    startMs: confirmed.start_ms,
-    endMs: confirmed.end_ms,
-    mimeType: confirmed.mime_type,
-    audioBase64: confirmed.audio_base64,
-    sizeBytes: confirmed.size_bytes,
-    attempts: confirmed.attempts,
-    status: confirmed.status,
-    lastError: confirmed.last_error || undefined,
-    processingBy: confirmed.processing_by || undefined,
-    retryAt: confirmed.retry_at || undefined,
-    createdAt: confirmed.created_at,
-    updatedAt: confirmed.updated_at
-  }
+  return confirmed
 }
 
 async function processChunkJob(
@@ -970,15 +883,8 @@ async function processChunkJob(
       createdAt: nowIso
     }
 
-    // Save chunk to D1
-    await env.DB.prepare(
-      'INSERT INTO chunks (task_id, chunk_index, start_ms, end_ms, text, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(taskId, claimed.index, claimed.startMs, claimed.endMs, transcription, nowIso).run()
-    
-    // Delete job
-    await env.DB.prepare(
-      'DELETE FROM chunk_jobs WHERE task_id = ? AND chunk_index = ?'
-    ).bind(taskId, claimed.index).run()
+    await env.TASKS_KV.put(chunkKey(taskId, claimed.index), JSON.stringify(chunkRecord))
+    await env.TASKS_KV.delete(chunkJobKey(taskId, claimed.index))
 
     await saveChunkState(env, taskId, {
       index: claimed.index,
@@ -1020,20 +926,24 @@ async function handleChunkJobFailure(
   const retryable = allowRetry && attemptNumber < config.chunkJobMaxAttempts
   const nextStatus: ChunkJobStatus = retryable ? 'queued' : 'error'
   const retryDelayMs = retryable ? getBackoffDelay(attemptNumber) : 0
-  const retryAt = retryable ? new Date(Date.now() + retryDelayMs).toISOString() : null
-  const errorMessage = truncateString(message, 200)
 
-  // Update job in D1
-  await env.DB.prepare(
-    'UPDATE chunk_jobs SET attempts = ?, status = ?, last_error = ?, processing_by = NULL, retry_at = ?, updated_at = ? WHERE task_id = ? AND chunk_index = ?'
-  ).bind(attemptNumber, nextStatus, errorMessage, retryAt, nowIso, taskId, job.index).run()
-  
+  const updatedJob: ChunkJobRecord = {
+    ...job,
+    attempts: attemptNumber,
+    status: nextStatus,
+    updatedAt: nowIso,
+    lastError: truncateString(message, 200),
+    processingBy: undefined,
+    retryAt: retryable ? new Date(Date.now() + retryDelayMs).toISOString() : undefined
+  }
+
+  await env.TASKS_KV.put(chunkJobKey(taskId, job.index), JSON.stringify(updatedJob))
   await saveChunkState(env, taskId, {
     index: job.index,
     status: nextStatus,
     attempts: attemptNumber,
     updatedAt: nowIso,
-    lastError: errorMessage
+    lastError: truncateString(message, 200)
   })
 
   if (retryable) {
@@ -1066,9 +976,7 @@ async function saveChunkState(
   taskId: string,
   state: ChunkStateRecord
 ): Promise<void> {
-  await env.DB.prepare(
-    'INSERT OR REPLACE INTO chunk_states (task_id, chunk_index, status, last_error, updated_at) VALUES (?, ?, ?, ?, ?)'
-  ).bind(taskId, state.index, state.status, state.lastError || null, state.updatedAt).run()
+  await env.TASKS_KV.put(chunkStateKey(taskId, state.index), JSON.stringify(state))
 }
 
 async function getChunkSummary(env: Bindings, taskId: string): Promise<ChunkSummary> {
@@ -1102,24 +1010,31 @@ async function getChunkSummary(env: Bindings, taskId: string): Promise<ChunkSumm
 }
 
 async function getChunkStateRecords(env: Bindings, taskId: string): Promise<ChunkStateRecord[]> {
-  const results = await env.DB.prepare(
-    'SELECT chunk_index, status, last_error, updated_at FROM chunk_states WHERE task_id = ? ORDER BY chunk_index'
-  ).bind(taskId).all<{
-    chunk_index: number
-    status: ChunkJobStatus
-    last_error: string | null
-    updated_at: string
-  }>()
-  
-  if (!results.results) return []
-  
-  return results.results.map(row => ({
-    index: row.chunk_index,
-    status: row.status,
-    lastError: row.last_error || undefined,
-    updatedAt: row.updated_at,
-    attempts: 0 // Not stored in chunk_states table
-  }))
+  const prefix = chunkStatePrefix(taskId)
+  let cursor: string | undefined
+  const records: ChunkStateRecord[] = []
+
+  do {
+    const list = await env.TASKS_KV.list({ prefix, limit: 200, cursor })
+    if (list.keys.length === 0) {
+      cursor = list.cursor
+      continue
+    }
+
+    const fetched = await Promise.all(
+      list.keys.map((entry) => env.TASKS_KV.get(entry.name, { type: 'json' }) as Promise<ChunkStateRecord | null>)
+    )
+
+    for (const record of fetched) {
+      if (record) {
+        records.push(record)
+      }
+    }
+
+    cursor = list.cursor
+  } while (cursor)
+
+  return records
 }
 
 async function updateTaskProgress(env: Bindings, taskId: string): Promise<TaskRecord | null> {
@@ -1131,14 +1046,13 @@ async function updateTaskProgress(env: Bindings, taskId: string): Promise<TaskRe
   const nowIso = new Date().toISOString()
 
   if (task.status === 'error') {
-    await env.DB.prepare(
-      'UPDATE tasks SET processed_chunks = ?, updated_at = ? WHERE id = ?'
-    ).bind(processedChunks, nowIso, taskId).run()
-    return {
+    const errored: TaskRecord = {
       ...task,
       processedChunks,
       updatedAt: nowIso
     }
+    await env.TASKS_KV.put(taskKey(taskId), JSON.stringify(errored))
+    return errored
   }
 
   let status: TaskStatus = task.status
@@ -1150,80 +1064,37 @@ async function updateTaskProgress(env: Bindings, taskId: string): Promise<TaskRe
     status = 'transcribing'
   }
 
-  await env.DB.prepare(
-    'UPDATE tasks SET processed_chunks = ?, status = ?, updated_at = ? WHERE id = ?'
-  ).bind(processedChunks, status, nowIso, taskId).run()
-  
-  return {
+  const updated: TaskRecord = {
     ...task,
     processedChunks,
     status,
     updatedAt: nowIso
   }
+
+  await env.TASKS_KV.put(taskKey(taskId), JSON.stringify(updated))
+  return updated
 }
 
 async function getTask(env: Bindings, taskId: string): Promise<TaskRecord | null> {
-  const result = await env.DB.prepare(
-    'SELECT id, filename, total_chunks, processed_chunks, duration_ms, status, error, created_at, updated_at FROM tasks WHERE id = ?'
-  ).bind(taskId).first<{
-    id: string
-    filename: string | null
-    total_chunks: number
-    processed_chunks: number
-    duration_ms: number | null
-    status: TaskStatus
-    error: string | null
-    created_at: string
-    updated_at: string
-  }>()
-  
-  if (!result) return null
-  
-  return {
-    id: result.id,
-    filename: result.filename || undefined,
-    totalChunks: result.total_chunks,
-    processedChunks: result.processed_chunks,
-    durationMs: result.duration_ms || undefined,
-    status: result.status,
-    error: result.error || undefined,
-    createdAt: result.created_at,
-    updatedAt: result.updated_at
-  }
+  const stored = await env.TASKS_KV.get(taskKey(taskId), { type: 'json' })
+  return (stored as TaskRecord | null) ?? null
 }
 
 async function getChunk(env: Bindings, taskId: string, index: number): Promise<ChunkRecord | null> {
-  const result = await env.DB.prepare(
-    'SELECT chunk_index, start_ms, end_ms, text, raw_response, created_at FROM chunks WHERE task_id = ? AND chunk_index = ?'
-  ).bind(taskId, index).first<{
-    chunk_index: number
-    start_ms: number
-    end_ms: number
-    text: string
-    raw_response: string | null
-    created_at: string
-  }>()
-  
-  if (!result) return null
-  
-  return {
-    index: result.chunk_index,
-    startMs: result.start_ms,
-    endMs: result.end_ms,
-    text: result.text,
-    rawResponse: result.raw_response ? JSON.parse(result.raw_response) : undefined,
-    createdAt: result.created_at
-  }
+  const stored = await env.TASKS_KV.get(chunkKey(taskId, index), { type: 'json' })
+  return (stored as ChunkRecord | null) ?? null
 }
 
 async function setTaskError(env: Bindings, taskId: string, message: string) {
   const task = await getTask(env, taskId)
   if (!task) return
-  const now = new Date().toISOString()
-  await env.DB.prepare(
-    'UPDATE tasks SET status = ?, error = ?, updated_at = ? WHERE id = ?'
-  ).bind('error', message, now, taskId).run()
-  
+  const updated: TaskRecord = {
+    ...task,
+    status: 'error',
+    error: message,
+    updatedAt: new Date().toISOString()
+  }
+  await env.TASKS_KV.put(taskKey(taskId), JSON.stringify(updated))
   await appendTaskLog(env, taskId, {
     level: 'error',
     message: 'Task marked as error',
@@ -1236,35 +1107,36 @@ async function setTaskError(env: Bindings, taskId: string, message: string) {
 async function appendTaskLog(env: Bindings, taskId: string, entry: TaskLogInput) {
   try {
     const timestamp = entry.timestamp ?? new Date().toISOString()
+    const existing = (await env.TASKS_KV.get(taskLogKey(taskId), { type: 'json' })) as TaskLogEntry[] | null
+    const logs = Array.isArray(existing) ? [...existing] : []
     const context = sanitizeLogContext(entry.context)
-    const contextJson = context ? JSON.stringify(context) : null
-    
-    await env.DB.prepare(
-      'INSERT INTO task_logs (task_id, timestamp, level, message, context) VALUES (?, ?, ?, ?, ?)'
-    ).bind(taskId, timestamp, entry.level, entry.message, contextJson).run()
+    const logEntry: TaskLogEntry = {
+      timestamp,
+      level: entry.level,
+      message: entry.message,
+      ...(context ? { context } : {})
+    }
+    logs.push(logEntry)
+    const trimmed = logs.length > TASK_LOG_LIMIT ? logs.slice(-TASK_LOG_LIMIT) : logs
+    await env.TASKS_KV.put(taskLogKey(taskId), JSON.stringify(trimmed))
   } catch (error) {
     console.error('appendTaskLog failed', error)
   }
 }
 
 async function getTaskLogs(env: Bindings, taskId: string, limit = 40): Promise<TaskLogEntry[]> {
-  const results = await env.DB.prepare(
-    'SELECT timestamp, level, message, context FROM task_logs WHERE task_id = ? ORDER BY timestamp DESC LIMIT ?'
-  ).bind(taskId, limit).all<{
-    timestamp: string
-    level: TaskLogLevel
-    message: string
-    context: string | null
-  }>()
-  
-  if (!results.results) return []
-  
-  return results.results.reverse().map(row => ({
-    timestamp: row.timestamp,
-    level: row.level,
-    message: row.message,
-    context: row.context ? JSON.parse(row.context) : undefined
-  }))
+  const stored = (await env.TASKS_KV.get(taskLogKey(taskId), { type: 'json' })) as TaskLogEntry[] | null
+  if (!stored || !Array.isArray(stored)) {
+    return []
+  }
+  if (stored.length <= limit) {
+    return stored
+  }
+  return stored.slice(-limit)
+}
+
+function taskLogKey(taskId: string) {
+  return `task:${taskId}:logs`
 }
 
 function sanitizeLogContext(context?: Record<string, unknown>): Record<string, unknown> | undefined {
