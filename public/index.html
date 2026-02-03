@@ -347,6 +347,97 @@
       </main>
     </div>
     
+    <!-- 進捗管理画面 -->
+    <div id="page-progress" class="page">
+      <header class="bg-white border-b border-gray-200 px-6 py-4">
+        <h1 class="text-xl font-bold text-gray-900">進捗管理</h1>
+      </header>
+      
+      <main class="px-6 py-4">
+        <!-- タスク情報 -->
+        <div id="task-info" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg hidden">
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span class="text-gray-600">タスクID:</span>
+              <span class="font-mono text-gray-900" id="progress-task-id">-</span>
+            </div>
+            <div>
+              <span class="text-gray-600">ファイル名:</span>
+              <span class="text-gray-900" id="progress-filename">-</span>
+            </div>
+            <div>
+              <span class="text-gray-600">分割サイズ:</span>
+              <span class="text-gray-900" id="progress-chunk-size">-</span>
+            </div>
+            <div>
+              <span class="text-gray-600">チャンク:</span>
+              <span class="text-gray-900" id="progress-chunks">-</span>
+            </div>
+            <div>
+              <span class="text-gray-600">重複:</span>
+              <span class="text-gray-900" id="progress-overlap">-</span>
+            </div>
+            <div>
+              <span class="text-gray-600">並列:</span>
+              <span class="text-gray-900" id="progress-parallel">-</span>
+            </div>
+            <div class="col-span-2">
+              <span class="text-gray-600">Geminiモデル:</span>
+              <span class="text-gray-900" id="progress-model">-</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- ステータス表示 -->
+        <div id="progress-status" class="mb-4 p-4 bg-white border border-gray-200 rounded-lg hidden">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-semibold text-gray-900" id="progress-status-text">待機中</span>
+            <span class="text-xs text-gray-600" id="progress-chunk-count">0/0 チャンク処理済み</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2">
+            <div id="progress-status-bar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+        
+        <!-- ログパネル -->
+        <div class="grid grid-cols-1 gap-4">
+          <!-- ステータスログ -->
+          <div class="bg-gray-900 rounded-lg p-4">
+            <h3 class="text-white text-sm font-semibold mb-2">ステータス</h3>
+            <div id="progress-status-log" class="text-green-400 text-xs font-mono max-h-64 overflow-y-auto whitespace-pre-wrap">
+              ログを読み込んでいます...
+            </div>
+          </div>
+          
+          <!-- 最新レスポンス -->
+          <div class="bg-gray-900 rounded-lg p-4">
+            <h3 class="text-white text-sm font-semibold mb-2">最新レスポンス</h3>
+            <div id="progress-response-log" class="text-blue-400 text-xs font-mono max-h-64 overflow-y-auto whitespace-pre-wrap">
+              レスポンスを待機中...
+            </div>
+          </div>
+          
+          <!-- サーバーログ -->
+          <div class="bg-gray-900 rounded-lg p-4">
+            <h3 class="text-white text-sm font-semibold mb-2">サーバーログ</h3>
+            <div id="progress-server-log" class="text-yellow-400 text-xs font-mono max-h-64 overflow-y-auto whitespace-pre-wrap">
+              サーバーログを読み込んでいます...
+            </div>
+          </div>
+        </div>
+        
+        <!-- アクションボタン -->
+        <div class="mt-4 flex gap-2">
+          <button id="progress-reprocess" class="hidden flex-1 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-semibold py-2 px-4 rounded">
+            未処理チャンクを再処理
+          </button>
+          <button id="progress-retry-merge" class="hidden flex-1 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold py-2 px-4 rounded">
+            結合を再試行
+          </button>
+        </div>
+      </main>
+    </div>
+    
     
     <!-- オーディオプレイヤーモーダル -->
     <div id="audio-player-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50" style="display: none;">
@@ -390,6 +481,12 @@
         </svg>
         <span>履歴</span>
       </a>
+      <a href="#progress" class="nav-item" id="nav-progress" data-page="progress">
+        <svg class="w-6 h-6 mb-1" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        <span>進捗</span>
+      </a>
       <a href="#admin" class="nav-item" id="nav-admin" data-page="admin">
         <svg class="w-6 h-6 mb-1" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
@@ -403,6 +500,6 @@
     <audio id="audio-player" class="hidden"></audio>
     <canvas id="waveform-canvas" class="hidden"></canvas>
     
-    <script type="module" src="/static/app.js?v=20260203093000"></script>
+    <script type="module" src="/static/app.js?v=20260203094500"></script>
   </body>
 </html>

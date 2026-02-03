@@ -397,6 +397,10 @@ async function processAudioFile(file) {
   if (progressPanel) progressPanel.classList.remove('hidden')
   if (logsPanel) logsPanel.classList.remove('hidden')
   
+  // 進捗ページに自動遷移
+  window.location.hash = 'progress'
+  showPage('progress')
+  
   logStatus('音声メタデータを読み込み中...')
 
   try {
@@ -654,6 +658,11 @@ function handleStatusUpdate(status) {
   }
 
   updateQueueActionVisibility(status)
+  
+  // 進捗ページが表示されている場合は更新
+  if (window.location.hash === '#progress') {
+    updateProgressPage()
+  }
 }
 
 function handleQueueStallDetection(summary) {
@@ -1576,12 +1585,14 @@ async function loadTaskDetails(taskId) {
 const pages = {
   home: document.getElementById('page-home'),
   history: document.getElementById('page-history'),
+  progress: document.getElementById('page-progress'),
   admin: document.getElementById('page-admin')
 }
 
 const navButtons = {
   home: document.getElementById('nav-home'),
   history: document.getElementById('nav-history'),
+  progress: document.getElementById('nav-progress'),
   admin: document.getElementById('nav-admin')
 }
 
@@ -1610,6 +1621,8 @@ function showPage(pageName) {
     loadMeetingHistory()
   } else if (pageName === 'admin') {
     loadAdminErrors()
+  } else if (pageName === 'progress') {
+    updateProgressPage()
   }
 }
 
@@ -1933,6 +1946,118 @@ if (closePlayerBtn && audioPlayerModal && modalAudioPlayer) {
       audioPlayerModal.classList.add('hidden')
     }
   })
+}
+
+// ========================================
+// 進捗管理画面の処理
+// ========================================
+
+function updateProgressPage() {
+  // 現在処理中のタスクがあれば表示
+  if (state.taskId && state.isProcessing) {
+    showProgressTask()
+  } else {
+    showNoActiveTask()
+  }
+}
+
+function showProgressTask() {
+  const taskInfo = document.getElementById('task-info')
+  const progressStatus = document.getElementById('progress-status')
+  
+  if (taskInfo) taskInfo.classList.remove('hidden')
+  if (progressStatus) progressStatus.classList.remove('hidden')
+  
+  // タスク情報を更新
+  updateProgressTaskInfo()
+  
+  // ログを更新（既存のログエリアを使用）
+  updateProgressLogs()
+}
+
+function showNoActiveTask() {
+  const taskInfo = document.getElementById('task-info')
+  const progressStatus = document.getElementById('progress-status')
+  
+  if (taskInfo) taskInfo.classList.add('hidden')
+  if (progressStatus) progressStatus.classList.add('hidden')
+  
+  // ログエリアにメッセージを表示
+  const statusLog = document.getElementById('progress-status-log')
+  const responseLog = document.getElementById('progress-response-log')
+  const serverLog = document.getElementById('progress-server-log')
+  
+  if (statusLog) statusLog.textContent = '現在処理中のタスクはありません'
+  if (responseLog) responseLog.textContent = '処理を開始すると、ここにレスポンスが表示されます'
+  if (serverLog) serverLog.textContent = 'サーバーログはまだありません'
+}
+
+function updateProgressTaskInfo() {
+  // タスク情報を表示
+  const taskIdEl = document.getElementById('progress-task-id')
+  const filenameEl = document.getElementById('progress-filename')
+  const chunkSizeEl = document.getElementById('progress-chunk-size')
+  const chunksEl = document.getElementById('progress-chunks')
+  const overlapEl = document.getElementById('progress-overlap')
+  const parallelEl = document.getElementById('progress-parallel')
+  const modelEl = document.getElementById('progress-model')
+  
+  if (taskIdEl) taskIdEl.textContent = state.taskId || '-'
+  if (filenameEl) filenameEl.textContent = state.selectedFile?.name || '-'
+  if (chunkSizeEl) chunkSizeEl.textContent = `${formatBytes(runtimeConfig.chunkSizeBytes)} / チャンク`
+  if (chunksEl) chunksEl.textContent = `${state.latestStatus?.processedChunks || 0}/${state.totalChunks}`
+  if (overlapEl) overlapEl.textContent = `${runtimeConfig.overlapSeconds}秒`
+  if (parallelEl) parallelEl.textContent = `${runtimeConfig.transcriptionConcurrency}個`
+  if (modelEl) modelEl.textContent = 'Flash Preview (3.0)'
+  
+  // ステータスとプログレスバーを更新
+  updateProgressStatus()
+}
+
+function updateProgressStatus() {
+  const statusTextEl = document.getElementById('progress-status-text')
+  const chunkCountEl = document.getElementById('progress-chunk-count')
+  const statusBarEl = document.getElementById('progress-status-bar')
+  
+  const status = state.latestStatus?.status || 'initialized'
+  const processed = state.latestStatus?.processedChunks || 0
+  const total = state.totalChunks || 0
+  const percentage = total > 0 ? Math.round((processed / total) * 100) : 0
+  
+  const statusText = {
+    'initialized': '初期化済み',
+    'transcribing': '文字起こし中',
+    'transcribed': '文字起こし完了',
+    'completed': '完了',
+    'error': 'エラー'
+  }[status] || status
+  
+  if (statusTextEl) statusTextEl.textContent = statusText
+  if (chunkCountEl) chunkCountEl.textContent = `${processed}/${total} チャンク処理済み`
+  if (statusBarEl) statusBarEl.style.width = `${percentage}%`
+}
+
+function updateProgressLogs() {
+  const statusLog = document.getElementById('progress-status-log')
+  const responseLog = document.getElementById('progress-response-log')
+  const serverLog = document.getElementById('progress-server-log')
+  
+  // ステータスログ（elements.statusLogの内容をコピー）
+  if (statusLog && elements.statusLog) {
+    statusLog.textContent = elements.statusLog.textContent || 'ログはまだありません'
+  }
+  
+  // レスポンスログ（最新のステータスをJSON表示）
+  if (responseLog && state.latestStatus) {
+    responseLog.textContent = JSON.stringify(state.latestStatus, null, 2)
+  } else if (responseLog) {
+    responseLog.textContent = 'レスポンスを待機中...'
+  }
+  
+  // サーバーログ（elements.serverLogの内容をコピー）
+  if (serverLog && elements.serverLog) {
+    serverLog.textContent = elements.serverLog.textContent || SERVER_LOG_EMPTY_TEXT
+  }
 }
 
 if (typeof window !== 'undefined') {
