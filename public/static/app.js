@@ -1585,6 +1585,7 @@ Object.keys(navButtons).forEach(key => {
   if (navButtons[key]) {
     navButtons[key].addEventListener('click', (e) => {
       e.preventDefault()
+      window.location.hash = key
       showPage(key)
     })
   }
@@ -1593,6 +1594,7 @@ Object.keys(navButtons).forEach(key => {
 const historyButton = document.getElementById('history-button')
 if (historyButton) {
   historyButton.addEventListener('click', () => {
+    window.location.hash = 'history'
     showPage('history')
   })
 }
@@ -1903,8 +1905,17 @@ if (closePlayerBtn && audioPlayerModal && modalAudioPlayer) {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
-    if (pages.home) {
-      showPage('home')
+    // URLハッシュからページを判定
+    const hash = window.location.hash.slice(1) // '#history' -> 'history'
+    const initialPage = hash && pages[hash] ? hash : 'home'
+    showPage(initialPage)
+  })
+  
+  // ハッシュ変更時のページ切り替え
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.slice(1)
+    if (hash && pages[hash]) {
+      showPage(hash)
     }
   })
 }
