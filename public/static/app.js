@@ -361,6 +361,12 @@ function setSelectedFile(file, source) {
   ]
   elements.fileSummary.textContent = summaryLines.join('\n')
   
+  // Show file info panel
+  const fileInfoPanel = document.getElementById('file-info-panel')
+  if (fileInfoPanel) {
+    fileInfoPanel.classList.remove('hidden')
+  }
+  
   // Show audio player for uploaded/recorded file
   if (file && (file.type.startsWith('audio/') || source === 'ブラウザ録音')) {
     showAudioPlayer(file)
@@ -384,6 +390,13 @@ async function processAudioFile(file) {
   resetQueueActions()
   state.taskId = null
   state.latestStatus = null
+  
+  // Show progress and logs panels
+  const progressPanel = document.getElementById('progress-panel')
+  const logsPanel = document.getElementById('logs-panel')
+  if (progressPanel) progressPanel.classList.remove('hidden')
+  if (logsPanel) logsPanel.classList.remove('hidden')
+  
   logStatus('音声メタデータを読み込み中...')
 
   try {
@@ -1056,6 +1069,18 @@ async function fetchTaskLogs(taskId) {
 function updateResultPanels() {
   elements.transcriptOutput.textContent = state.transcript || 'まだ文字起こしは完了していません。'
   elements.minutesOutput.textContent = state.minutes || '議事録生成は未実行です。'
+  
+  // Show results panel if transcript exists
+  const resultsPanel = document.getElementById('results-panel')
+  if (resultsPanel && state.transcript) {
+    resultsPanel.classList.remove('hidden')
+  }
+  
+  // Show minutes section if minutes exist
+  const minutesSection = document.getElementById('minutes-section')
+  if (minutesSection && state.minutes) {
+    minutesSection.classList.remove('hidden')
+  }
 }
 
 function toggleResultButtons(enabled) {
