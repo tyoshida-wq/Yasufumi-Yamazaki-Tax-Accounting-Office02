@@ -2140,7 +2140,7 @@ async function showMinutesDetailModal(taskId) {
       const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
       if (minutesResponse.ok) {
         const minutesData = await minutesResponse.json()
-        minutesEl.textContent = minutesData.minutes || '議事録がまだ生成されていません'
+        minutesEl.textContent = minutesData.content || minutesData.minutes || '議事録がまだ生成されていません'
       } else {
         minutesEl.textContent = '議事録がまだ生成されていません'
       }
@@ -2199,7 +2199,7 @@ async function showMinutesDetailModal(taskId) {
         const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
         if (minutesResponse.ok) {
           const minutesData = await minutesResponse.json()
-          downloadText(minutesData.minutes || '', `minutes-${taskId}.md`)
+          downloadText(minutesData.content || minutesData.minutes || '', `minutes-${taskId}.md`)
         } else {
           alert('議事録のダウンロードに失敗しました')
         }
