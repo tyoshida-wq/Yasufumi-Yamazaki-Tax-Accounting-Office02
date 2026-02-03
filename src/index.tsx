@@ -912,6 +912,14 @@ app.get('/api/tasks', async (c) => {
       return c.json({ tasks: [] })
     }
     
+    // Check which tasks have minutes
+    const taskIds = results.results.map(r => r.id)
+    const minutesResults = await c.env.DB.prepare(
+      `SELECT task_id FROM minutes WHERE task_id IN (${taskIds.map(() => '?').join(',')})`
+    ).bind(...taskIds).all<{ task_id: string }>()
+    
+    const tasksWithMinutes = new Set(minutesResults.results?.map(r => r.task_id) || [])
+    
     const tasks: TaskRecord[] = results.results.map(row => ({
       id: row.id,
       filename: row.filename || undefined,
@@ -921,7 +929,8 @@ app.get('/api/tasks', async (c) => {
       status: row.status,
       error: row.error || undefined,
       createdAt: row.created_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
+      hasMinutes: tasksWithMinutes.has(row.id)
     }))
     
     return c.json({ tasks })

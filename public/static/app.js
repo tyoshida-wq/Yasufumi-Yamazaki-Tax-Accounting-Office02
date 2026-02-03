@@ -1740,6 +1740,16 @@ function createMeetingCard(task) {
     ? '<span class="status-badge error">エラー</span>'
     : '<span class="status-badge processing">処理中</span>'
   
+  // Show minutes indicator if available
+  const minutesIndicator = task.hasMinutes
+    ? `<div class="mt-2 text-sm text-gray-600 flex items-center gap-1">
+         <svg class="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 24 24">
+           <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+         </svg>
+         <span class="text-purple-700 font-semibold">議事録あり</span>
+       </div>`
+    : ''
+  
   return `
     <div class="meeting-card cursor-pointer hover:shadow-md transition-shadow view-details" data-task-id="${task.id}">
       <div class="flex items-start justify-between mb-2">
@@ -1751,6 +1761,7 @@ function createMeetingCard(task) {
             </svg>
             <span>${durationStr}</span>
           </div>
+          ${minutesIndicator}
         </div>
         ${statusBadge}
       </div>
