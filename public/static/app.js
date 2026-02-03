@@ -1556,7 +1556,7 @@ const navButtons = {
 function showPage(pageName) {
   Object.keys(pages).forEach(key => {
     if (pages[key]) {
-      pages[key].classList.add('hidden')
+      pages[key].classList.remove('active')
     }
   })
   
@@ -1567,7 +1567,7 @@ function showPage(pageName) {
   })
   
   if (pages[pageName]) {
-    pages[pageName].classList.remove('hidden')
+    pages[pageName].classList.add('active')
   }
   
   if (navButtons[pageName]) {
