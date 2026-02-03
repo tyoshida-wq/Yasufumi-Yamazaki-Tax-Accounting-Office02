@@ -1611,7 +1611,8 @@ async function loadMeetingHistory() {
     const response = await fetch('/api/tasks?limit=50')
     if (!response.ok) throw new Error('データの取得に失敗しました')
     
-    const tasks = await response.json()
+    const data = await response.json()
+    const tasks = data.tasks || []
     
     if (tasks.length === 0) {
       meetingList.innerHTML = '<div class="text-center text-gray-500 py-8">議事録がまだありません</div>'
@@ -1645,10 +1646,10 @@ async function loadMeetingHistory() {
 }
 
 function createMeetingCard(task) {
-  const date = new Date(task.created_at)
+  const date = new Date(task.createdAt || task.created_at)
   const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
   
-  const duration = task.duration_ms ? Math.floor(task.duration_ms / 1000) : 0
+  const duration = (task.durationMs || task.duration_ms) ? Math.floor((task.durationMs || task.duration_ms) / 1000) : 0
   const hours = Math.floor(duration / 3600)
   const minutes = Math.floor((duration % 3600) / 60)
   const seconds = duration % 60
@@ -1739,7 +1740,8 @@ async function loadAdminErrors() {
     const response = await fetch('/api/tasks?limit=100')
     if (!response.ok) throw new Error('データの取得に失敗しました')
     
-    const tasks = await response.json()
+    const data = await response.json()
+    const tasks = data.tasks || []
     const errorTasks = tasks.filter(task => task.status === 'error')
     
     if (errorTasks.length === 0) {
@@ -1779,7 +1781,7 @@ async function loadAdminErrors() {
 }
 
 function createTaskErrorCard(task) {
-  const date = new Date(task.created_at)
+  const date = new Date(task.createdAt || task.created_at)
   const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
   
   const errorMessage = task.error || 'Unknown error'
