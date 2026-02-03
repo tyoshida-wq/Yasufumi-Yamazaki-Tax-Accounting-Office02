@@ -2279,13 +2279,32 @@ function mergeChunks(chunks: ChunkRecord[]): string {
   const sorted = [...chunks].sort((a, b) => a.index - b.index)
   let thresholdMs = 0
   const lines: string[] = []
+  const skippedLines: Array<{
+    chunkIndex: number
+    timestamp: string
+    threshold: string
+    line: string
+  }> = []
+
+  // 5秒のオーバーラップを考慮
+  const OVERLAP_MS = 5000
 
   for (const chunk of sorted) {
+    // このチャンクの開始時刻の5秒前までの発言をスキップ
+    const skipThresholdMs = chunk.startMs - OVERLAP_MS
+
     const chunkLines = chunk.text.split(/\r?\n/)
     for (const line of chunkLines) {
       const timestampMs = getTimestampMs(line)
       if (timestampMs !== null) {
-        if (timestampMs + 1 < thresholdMs) {
+        // オーバーラップ部分（前のチャンクの終端5秒）をスキップ
+        if (timestampMs < skipThresholdMs) {
+          skippedLines.push({
+            chunkIndex: chunk.index,
+            timestamp: formatTimestampFromMs(timestampMs),
+            threshold: formatTimestampFromMs(skipThresholdMs),
+            line: line.substring(0, 100)
+          })
           continue
         }
         thresholdMs = Math.max(thresholdMs, timestampMs)
@@ -2298,10 +2317,32 @@ function mergeChunks(chunks: ChunkRecord[]): string {
         }
       }
     }
-    thresholdMs = Math.max(thresholdMs, chunk.endMs)
+    // 修正: chunk.endMs ではなく chunk.startMs を使用
+    // これにより次のチャンクの発言が誤って除外されることを防ぐ
+    thresholdMs = Math.max(thresholdMs, chunk.startMs)
+  }
+
+  // スキップされた発言をログ出力（デバッグ用）
+  if (skippedLines.length > 0) {
+    console.log(`[mergeChunks] Skipped ${skippedLines.length} overlapping lines:`)
+    skippedLines.slice(0, 5).forEach((item) => {
+      console.log(`  Chunk ${item.chunkIndex}: ${item.timestamp} < ${item.threshold} - ${item.line}`)
+    })
   }
 
   return lines.join('\n')
+}
+
+function formatTimestampFromMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
 function getTimestampMs(line: string): number | null {
