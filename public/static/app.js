@@ -27,6 +27,7 @@ const elements = {
   audioPlayer: document.getElementById('audio-player'),
   audioPlayerContainer: document.getElementById('audio-player-container'),
   clearAudio: document.getElementById('clear-audio'),
+  uploadButton: document.getElementById('upload-button'),
   fileInput: document.getElementById('file-input'),
   fileSummary: document.getElementById('file-summary'),
   startProcessing: document.getElementById('start-processing'),
@@ -138,6 +139,12 @@ if (elements.serverLog) {
 
 applyRuntimeConfigToUI()
 void loadRuntimeConfig()
+
+if (elements.uploadButton) {
+  elements.uploadButton.addEventListener('click', () => {
+    elements.fileInput?.click()
+  })
+}
 
 if (elements.fileInput) {
   elements.fileInput.addEventListener('change', (event) => {
