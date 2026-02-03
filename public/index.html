@@ -3,192 +3,300 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>税理士事務所向け AI議事録生成MVP</title>
+    <title>山崎奏史税理士事務所 議事録生成アプリ</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      /* カスタムスタイル */
+      .record-button {
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #4F7FFF 0%, #3B5FDB 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        color: white;
+        font-size: 18px;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(79, 127, 255, 0.3);
+        transition: all 0.3s ease;
+        cursor: pointer;
+        border: none;
+      }
+      
+      .record-button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 15px 40px rgba(79, 127, 255, 0.4);
+      }
+      
+      .record-button:active {
+        transform: scale(0.95);
+      }
+      
+      .record-button.recording {
+        background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+        animation: pulse 1.5s infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% {
+          box-shadow: 0 10px 30px rgba(239, 68, 68, 0.3);
+        }
+        50% {
+          box-shadow: 0 15px 50px rgba(239, 68, 68, 0.5);
+        }
+      }
+      
+      .bottom-nav {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        border-top: 1px solid #E2E8F0;
+        display: flex;
+        justify-content: space-around;
+        padding: 12px 0;
+        z-index: 1000;
+      }
+      
+      .nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: #94A3B8;
+        font-size: 12px;
+        text-decoration: none;
+        position: relative;
+      }
+      
+      .nav-item.active {
+        color: #4F7FFF;
+      }
+      
+      .nav-badge {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: #EF4444;
+        color: white;
+        border-radius: 12px;
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        min-width: 20px;
+        text-align: center;
+      }
+      
+      .page {
+        display: none;
+        padding-bottom: 80px;
+      }
+      
+      .page.active {
+        display: block;
+      }
+      
+      .meeting-card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      
+      .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      
+      .status-badge.completed {
+        background: #D1FAE5;
+        color: #059669;
+      }
+      
+      .status-badge.error {
+        background: #FEE2E2;
+        color: #DC2626;
+      }
+      
+      .status-badge.processing {
+        background: #DBEAFE;
+        color: #2563EB;
+      }
+    </style>
   </head>
-  <body class="min-h-screen bg-slate-50 text-slate-900">
-    <header class="border-b border-slate-200 bg-white/80 backdrop-blur">
-      <div class="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-8 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="text-sm font-semibold uppercase tracking-wide text-emerald-600">MVP</p>
-          <h1 class="mt-1 text-3xl font-bold tracking-tight">税理士事務所向け AI議事録生成</h1>
-          <p class="mt-2 text-sm text-slate-600">
-            最長3時間の会議録音を分割し、Gemini 3.0 Flash/Proで文字起こしと議事録化を行うプロトタイプです。
-          </p>
+  <body class="min-h-screen bg-gray-50">
+    <!-- ホーム画面 -->
+    <div id="home-page" class="page active">
+      <header class="bg-white border-b border-gray-200 px-6 py-4">
+        <p class="text-sm text-gray-600">山崎奏史税理士事務所</p>
+        <h1 class="text-xl font-bold text-gray-900">議事録生成アプリ</h1>
+      </header>
+      
+      <main class="px-6 py-8">
+        <div class="text-center mb-8">
+          <p class="text-gray-600 mb-2">ボタンを押すと音声認識が始まります</p>
         </div>
-        <div class="flex items-center gap-3 text-sm text-slate-500">
-          <span class="flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-700">
-            <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
-            ステップ1: 文字起こし
-          </span>
-          <span class="hidden items-center gap-2 rounded-full bg-indigo-100 px-3 py-1 font-medium text-indigo-700 sm:flex">
-            <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
-            ステップ2: 議事録生成
-          </span>
+        
+        <!-- 録音ボタン -->
+        <div class="flex justify-center mb-8">
+          <button id="record-button" class="record-button">
+            <svg class="w-16 h-16 mb-2" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+            <span id="record-text">録音開始</span>
+          </button>
         </div>
-      </div>
-    </header>
-
-    <main class="mx-auto max-w-5xl space-y-12 px-6 py-10">
-      <section class="space-y-6 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-        <h2 class="text-xl font-semibold">1. 録音または音声ファイルを準備</h2>
-        <div class="grid gap-6 lg:grid-cols-2">
-          <div class="space-y-4">
-            <h3 class="text-base font-semibold text-slate-700">ブラウザで録音</h3>
-            <p class="text-sm text-slate-500">ブラウザのマイクを使用し、会議を直接録音できます。</p>
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div class="flex flex-wrap items-center gap-3">
-                <button id="record-start" class="btn-primary">録音開始</button>
-                <button id="record-stop" class="btn-muted" disabled>停止</button>
-                <span id="record-status" class="text-sm text-slate-500">マイクは未使用です</span>
-              </div>
-              <div class="mt-3 flex items-center gap-2 text-sm text-slate-600">
-                <span class="font-medium">録音時間:</span>
-                <span id="record-timer">00:00:00</span>
-              </div>
-              <div class="mt-4 rounded-lg border border-slate-300 bg-white p-2">
-                <canvas id="waveform-canvas" class="w-full" width="800" height="120"></canvas>
-              </div>
-              <div id="audio-player-container" class="mt-4 hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-sm font-medium text-emerald-700">録音済み音声</span>
-                  <button id="clear-audio" class="text-xs text-emerald-600 hover:text-emerald-800">削除</button>
-                </div>
-                <audio id="audio-player" controls class="w-full"></audio>
-              </div>
-            </div>
-          </div>
-
-          <div class="space-y-4">
-            <h3 class="text-base font-semibold text-slate-700">既存ファイルをアップロード</h3>
-            <p class="text-sm text-slate-500">WAV / MP3 / M4A / WebMなど一般的な音声形式に対応しています（最大約3時間）。</p>
-            <label for="file-input" data-dropzone class="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 p-6 text-center transition hover:border-indigo-400 hover:bg-indigo-100">
-              <input id="file-input" type="file" accept="audio/*" class="hidden" />
-              <span class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 16V4m0 12 3.5-3.5M12 16l-3.5-3.5M9 20h6" />
-                </svg>
-              </span>
-              <div>
-                <p class="text-base font-medium text-indigo-700">音声ファイルを選択</p>
-                <p class="text-xs text-indigo-500">ドラッグ＆ドロップにも対応</p>
-              </div>
-            </label>
-            <div class="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600" id="file-summary">
-              音声ファイルが未選択です。
-            </div>
+        
+        <!-- 録音タイマー -->
+        <div id="record-timer-container" class="text-center mb-8 hidden">
+          <div class="text-4xl font-bold text-gray-900" id="record-timer">00:00:00</div>
+          <div class="text-sm text-gray-500 mt-2">録音中...</div>
+        </div>
+        
+        <!-- 音声ファイルをアップロード -->
+        <button id="upload-button" class="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-4 px-6 rounded-lg shadow-lg flex items-center justify-center mb-4">
+          <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
+          </svg>
+          音声ファイルをアップロード
+        </button>
+        <input type="file" id="file-input" accept="audio/*" class="hidden" />
+        
+        <!-- 過去の議事録を確認 -->
+        <button id="history-nav-button" class="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-4 px-6 rounded-lg shadow border border-gray-200 flex items-center justify-center">
+          <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
+          </svg>
+          過去の議事録を確認
+        </button>
+        
+        <!-- Voice Recognition System -->
+        <div class="flex justify-center mt-8">
+          <div class="text-center">
+            <svg class="w-16 h-16 mx-auto text-blue-500" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="4" y="2" width="4" height="20" rx="2"/>
+              <rect x="10" y="6" width="4" height="12" rx="2"/>
+              <rect x="16" y="2" width="4" height="20" rx="2"/>
+            </svg>
+            <p class="text-xs text-gray-500 mt-2">VOICE RECOGNITION SYSTEM</p>
           </div>
         </div>
-      </section>
-
-      <section class="space-y-6 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-xl font-semibold">2. 文字起こしを実行</h2>
-            <p class="text-sm text-slate-500">約1MBごとに分割し、5秒ずつ重ねてGemini 3.0 Flash Previewのキューに投入、複数チャンクを並列でタイムスタンプ付き文字起こしします。</p>
-          </div>
-          <button id="start-processing" class="btn-primary" disabled>文字起こしを開始</button>
-        </div>
-
-        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="space-y-1 text-sm">
-              <p class="font-medium text-slate-700">進捗</p>
-              <p id="progress-summary" class="text-slate-500">チャンク送信待ち</p>
-            </div>
-            <div class="text-right text-sm text-slate-500">
-              <p>分割サイズ: <span class="font-medium" id="chunk-info">-</span></p>
-              <p>Geminiモデル: <span class="font-medium">Flash Preview (3.0)</span></p>
-            </div>
-          </div>
-          <div class="mt-4 h-2 rounded-full bg-slate-200">
-            <div id="progress-bar" class="h-2 rounded-full bg-indigo-500 transition-all" style="width: 0%"></div>
-          </div>
-          <div class="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <h4 class="font-medium text-sm text-slate-600">ステータス</h4>
-              <pre id="status-log" class="log-panel"></pre>
-            </div>
-            <div>
-              <h4 class="font-medium text-sm text-slate-600">最新レスポンス</h4>
-              <pre id="response-log" class="log-panel"></pre>
-            </div>
-            <div>
-              <h4 class="font-medium text-sm text-slate-600">サーバーログ</h4>
-              <pre id="server-log" class="log-panel">サーバーログはまだありません。</pre>
-            </div>
-          </div>
-          <div class="mt-4 flex flex-wrap gap-3 text-sm" id="queue-actions">
-            <button id="trigger-reprocess" class="btn-secondary hidden">未処理チャンクを再処理</button>
-            <button id="retry-merge" class="btn-muted hidden">結合を再試行</button>
+      </main>
+    </div>
+    
+    <!-- 履歴画面 -->
+    <div id="history-page" class="page">
+      <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-900">過去の議事録</h1>
+        <button id="refresh-history" class="text-blue-500">
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+        </button>
+      </header>
+      
+      <main class="px-6 py-4">
+        <!-- 検索バー -->
+        <div class="mb-4">
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              id="search-input" 
+              placeholder="会議を検索（タイトル）"
+              class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button id="search-button" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg">
+              検索
+            </button>
           </div>
         </div>
-      </section>
-
-      <section class="space-y-6 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 class="text-xl font-semibold">3. 結果を確認</h2>
-            <p class="text-sm text-slate-500">
-              タイムスタンプ付き全文を生成後、Gemini 3.0 Pro Previewで議事録を作成します。
-            </p>
+        
+        <!-- 会議リスト -->
+        <div id="meeting-list" class="space-y-3">
+          <div class="text-center text-gray-500 py-8">履歴を読み込んでいます...</div>
+        </div>
+      </main>
+    </div>
+    
+    <!-- 管理画面 -->
+    <div id="admin-page" class="page">
+      <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          </svg>
+          <h1 class="text-xl font-bold text-gray-900">エラーログ</h1>
+        </div>
+        <button id="refresh-errors" class="text-blue-500">
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+        </button>
+      </header>
+      
+      <main class="px-6 py-4">
+        <!-- エラー統計 -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+          <div class="bg-white rounded-lg p-4 text-center shadow">
+            <div class="text-3xl font-bold text-gray-900" id="total-errors">117</div>
+            <div class="text-sm text-gray-500">総エラー数</div>
           </div>
-          <div class="flex flex-wrap gap-3">
-            <button id="generate-minutes" class="btn-secondary" disabled>議事録を生成</button>
-            <button id="download-transcript" class="btn-muted" disabled>全文をダウンロード</button>
-            <button id="download-minutes" class="btn-muted" disabled>議事録をダウンロード</button>
+          <div class="bg-white rounded-lg p-4 text-center shadow">
+            <div class="text-3xl font-bold text-orange-500" id="pending-errors">70</div>
+            <div class="text-sm text-gray-500">未解決</div>
+          </div>
+          <div class="bg-white rounded-lg p-4 text-center shadow">
+            <div class="text-3xl font-bold text-blue-500" id="frontend-errors">16</div>
+            <div class="text-sm text-gray-500">フロントエンド</div>
+          </div>
+          <div class="bg-white rounded-lg p-4 text-center shadow">
+            <div class="text-3xl font-bold text-green-500" id="backend-errors">101</div>
+            <div class="text-sm text-gray-500">バックエンド</div>
           </div>
         </div>
-
-        <div class="grid gap-6 lg:grid-cols-2">
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <h3 class="text-base font-semibold text-slate-700">タイムスタンプ付き全文</h3>
-              <button id="copy-transcript" class="link-button" disabled>コピー</button>
-            </div>
-            <pre id="transcript-output" class="result-panel">まだ文字起こしは完了していません。</pre>
-          </div>
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <h3 class="text-base font-semibold text-slate-700">議事録</h3>
-              <button id="copy-minutes" class="link-button" disabled>コピー</button>
-            </div>
-            <pre id="minutes-output" class="result-panel">議事録生成は未実行です。</pre>
-          </div>
+        
+        <!-- エラーリスト -->
+        <div id="error-list" class="space-y-3">
+          <!-- エラーカードはJavaScriptで動的に生成 -->
         </div>
-      </section>
-
-      <section class="space-y-6 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-xl font-semibold">タスク履歴</h2>
-            <p class="text-sm text-slate-500">過去の文字起こしタスクの一覧です。タスクをクリックして詳細を確認できます。</p>
-          </div>
-          <button id="refresh-history" class="btn-secondary">履歴を更新</button>
-        </div>
-
-        <div id="task-history-container" class="space-y-3">
-          <div class="text-center text-sm text-slate-500 py-8">履歴を読み込んでいます...</div>
-        </div>
-      </section>
-
-      <section class="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-        <h2 class="text-lg font-semibold text-slate-700">利用ガイドと注意事項</h2>
-        <ul class="mt-4 space-y-3 text-sm text-slate-600">
-          <li>・音声はフロントエンドで約1MBごとに分割し、チャンク間に5秒のオーバーラップを持たせます。</li>
-          <li>・サーバーサイドではGemini 3.0 Flash Previewにチャンクをキューイングし、最大4並列でタイムスタンプ付き文字起こしを取得します。</li>
-          <li>・全文結合後、必要に応じて「議事録生成」ボタンからGemini 3.0 Pro Previewを呼び出します。</li>
-          <li>・Gemini APIキーはCloudflare WorkersのSecretに設定してください。</li>
-          <li>・長時間音声の場合はブラウザメモリ使用量が増えるため、十分なスペックの端末をご利用ください。</li>
-        </ul>
-      </section>
-    </main>
-
-    <template id="status-template">
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 text-sm"></div>
-    </template>
-
-    <script type="module" src="/static/app.js?v=20260203000942"></script>
+      </main>
+    </div>
+    
+    <!-- ボトムナビゲーション -->
+    <nav class="bottom-nav">
+      <a href="#home" class="nav-item active" data-page="home">
+        <svg class="w-6 h-6 mb-1" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+        </svg>
+        <span>ホーム</span>
+      </a>
+      <a href="#history" class="nav-item" data-page="history">
+        <svg class="w-6 h-6 mb-1" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+        </svg>
+        <span>履歴</span>
+      </a>
+      <a href="#admin" class="nav-item" data-page="admin">
+        <svg class="w-6 h-6 mb-1" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+        </svg>
+        <span>管理</span>
+        <span class="nav-badge" id="error-count">70</span>
+      </a>
+    </nav>
+    
+    <!-- 隠しエレメント（バックエンドとの連携用） -->
+    <audio id="audio-player" class="hidden"></audio>
+    <canvas id="waveform-canvas" class="hidden"></canvas>
+    
+    <script type="module" src="/static/app.js?v=20260203050000"></script>
   </body>
 </html>
