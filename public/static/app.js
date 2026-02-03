@@ -1720,8 +1720,31 @@ async function loadTaskTranscript(taskId) {
     const audioCheckResponse = await fetch(`/api/tasks/${taskId}/audio`, { method: 'HEAD' })
     if (!audioCheckResponse.ok) {
       const errorResponse = await fetch(`/api/tasks/${taskId}/audio`)
-      const errorData = await errorResponse.json()
-      alert(errorData.message || errorData.error || '音声ファイルが利用できません')
+      const errorData = await errorResponse.json().catch(() => ({}))
+      
+      // Display Japanese error message
+      if (errorData.message) {
+        // Translate common error messages
+        let message = errorData.message
+        if (message.includes('processed before audio storage')) {
+          message = 'この議事録は音声保存機能が実装される前に処理されたため、音声ファイルが利用できません。'
+        } else if (message.includes('cleaned up')) {
+          message = '音声ファイルはクリーンアップされました。'
+        } else if (message.includes('not available')) {
+          message = '音声ファイルは利用できません。'
+        }
+        alert(message)
+      } else if (errorData.error) {
+        let error = errorData.error
+        if (error.includes('not found')) {
+          error = '音声ファイルが見つかりません。'
+        } else if (error.includes('not available')) {
+          error = '音声ファイルは利用できません。'
+        }
+        alert(error)
+      } else {
+        alert('音声ファイルが利用できません')
+      }
       return
     }
     

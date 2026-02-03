@@ -180,7 +180,7 @@ app.get('/api/config', (c) => {
 app.post('/api/tasks', async (c) => {
   const payload = await c.req.json().catch(() => null)
   if (!payload || typeof payload.totalChunks !== 'number' || payload.totalChunks <= 0) {
-    return c.json({ error: 'totalChunks is required and must be greater than 0' }, 400)
+    return c.json({ error: 'totalChunksは必須で、0より大きい値を指定してください' }, 400)
   }
 
   const taskId = crypto.randomUUID()
@@ -220,7 +220,7 @@ app.get('/api/tasks/:taskId/status', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
 
   const transcriptResult = await c.env.DB.prepare(
@@ -245,7 +245,7 @@ app.get('/api/tasks/:taskId/logs', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
 
   const limitParam = c.req.query('limit')
@@ -260,7 +260,7 @@ app.post('/api/tasks/:taskId/process', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
 
   const reasonParam = c.req.query('reason')
@@ -318,12 +318,12 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
     const taskId = c.req.param('taskId')
     const task = await getTask(c.env, taskId)
     if (!task) {
-      return c.json({ error: 'Task not found' }, 404)
+      return c.json({ error: 'タスクが見つかりません' }, 404)
     }
 
   const formData = await c.req.formData().catch(() => null)
   if (!formData) {
-    return c.json({ error: 'Invalid multipart/form-data payload' }, 400)
+    return c.json({ error: '無効なmultipart/form-dataペイロードです' }, 400)
   }
 
   const audio = formData.get('audio')
@@ -332,18 +332,18 @@ app.post('/api/tasks/:taskId/chunks', async (c) => {
   const endMs = Number(formData.get('endMs'))
 
   if (!(audio instanceof File)) {
-    return c.json({ error: 'audio file is required' }, 400)
+    return c.json({ error: '音声ファイルが必要です' }, 400)
   }
   if (!Number.isFinite(chunkIndex) || chunkIndex < 0) {
-    return c.json({ error: 'chunkIndex must be a non-negative number' }, 400)
+    return c.json({ error: 'chunkIndexは0以上の数値を指定してください' }, 400)
   }
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs <= startMs) {
-    return c.json({ error: 'startMs and endMs must be valid numbers' }, 400)
+    return c.json({ error: 'startMsとendMsは有効な数値を指定してください' }, 400)
   }
 
   const apiKey = c.env.GEMINI_API_KEY
   if (!apiKey) {
-    return c.json({ error: 'Gemini API key is not configured' }, 500)
+    return c.json({ error: 'Gemini APIキーが設定されていません' }, 500)
   }
 
   const existingChunk = await getChunk(c.env, taskId, chunkIndex)
@@ -446,7 +446,7 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
 
   const summary = await getChunkSummary(c.env, taskId)
@@ -464,13 +464,13 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
       }
     })
     return c.json({
-      error: 'One or more chunks failed transcription. Please retry the affected chunks.',
+      error: '一部のチャンクの文字起こしに失敗しました。失敗したチャンクを再試行してください。',
       chunkSummary: summary
     }, 409)
   }
 
   if (totalChunks === 0) {
-    return c.json({ error: 'No chunks available for merging' }, 400)
+    return c.json({ error: 'マージするチャンクがありません' }, 400)
   }
 
   if (pendingChunks > 0 || completedChunks < totalChunks || summaryTotal < totalChunks) {
@@ -563,7 +563,7 @@ app.get('/api/tasks/:taskId/transcript', async (c) => {
   ).bind(taskId).first<{ content: string }>()
   
   if (!result) {
-    return c.json({ error: 'Transcript not found' }, 404)
+    return c.json({ error: '文字起こしが見つかりません' }, 404)
   }
   return c.json({ transcript: result.content })
 })
@@ -575,7 +575,7 @@ app.get('/api/tasks/:taskId/audio', async (c) => {
   // Get task info
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
   
   // Get first chunk (chunk 0)
@@ -586,8 +586,8 @@ app.get('/api/tasks/:taskId/audio', async (c) => {
   if (!chunkResult || !chunkResult.r2_key) {
     // Audio chunks not available (old task or no audio stored)
     return c.json({ 
-      error: 'Audio file not available', 
-      message: 'This task was processed before audio storage was implemented, or audio files have been cleaned up.' 
+      error: '音声ファイルは利用できません', 
+      message: 'この議事録は音声保存機能が実装される前に処理されたため、音声ファイルが利用できません。' 
     }, 404)
   }
   
@@ -596,8 +596,8 @@ app.get('/api/tasks/:taskId/audio', async (c) => {
   
   if (!audioObject) {
     return c.json({ 
-      error: 'Audio data not found in storage',
-      message: `Expected audio at: ${chunkResult.r2_key}`
+      error: 'ストレージに音声データが見つかりません',
+      message: `音声ファイルの場所: ${chunkResult.r2_key}`
     }, 404)
   }
   
@@ -614,7 +614,7 @@ app.post('/api/tasks/:taskId/minutes', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
   if (!task) {
-    return c.json({ error: 'Task not found' }, 404)
+    return c.json({ error: 'タスクが見つかりません' }, 404)
   }
 
   const transcriptResult = await c.env.DB.prepare(
@@ -622,12 +622,12 @@ app.post('/api/tasks/:taskId/minutes', async (c) => {
   ).bind(taskId).first<{ content: string }>()
   
   if (!transcriptResult) {
-    return c.json({ error: 'Transcript is not ready' }, 409)
+    return c.json({ error: '文字起こしがまだ完了していません' }, 409)
   }
 
   const apiKey = c.env.GEMINI_API_KEY
   if (!apiKey) {
-    return c.json({ error: 'Gemini API key is not configured' }, 500)
+    return c.json({ error: 'Gemini APIキーが設定されていません' }, 500)
   }
 
   try {
@@ -693,7 +693,7 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
   ).bind(taskId).first<{ content: string, created_at: string }>()
   
   if (!result) {
-    return c.json({ error: 'Minutes not found' }, 404)
+    return c.json({ error: '議事録が見つかりません' }, 404)
   }
   
   const minutes: MinutesRecord = {
@@ -726,7 +726,7 @@ app.get('/api/test-r2', async (c) => {
     // Test read
     const object = await c.env.AUDIO_CHUNKS.get(testKey)
     if (!object) {
-      return c.json({ error: 'Failed to read from R2' }, 500)
+      return c.json({ error: 'R2からの読み込みに失敗しました' }, 500)
     }
     
     const text = await object.text()
@@ -758,7 +758,7 @@ app.delete('/api/tasks/:taskId', async (c) => {
     // Check if task exists
     const task = await getTask(c.env, taskId)
     if (!task) {
-      return c.json({ error: 'Task not found' }, 404)
+      return c.json({ error: 'タスクが見つかりません' }, 404)
     }
     
     // Delete from all tables (CASCADE will handle related records)
@@ -821,7 +821,7 @@ app.get('/api/tasks', async (c) => {
     return c.json({ tasks })
   } catch (error) {
     console.error('Failed to fetch tasks:', error)
-    return c.json({ error: 'Failed to fetch tasks' }, 500)
+    return c.json({ error: 'タスクの取得に失敗しました' }, 500)
   }
 })
 
