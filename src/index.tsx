@@ -811,6 +811,55 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
 
 app.get('/api/healthz', (c) => c.json({ ok: true }))
 
+// Admin endpoint: Fix chunk states inconsistency
+app.post('/api/tasks/:taskId/fix-chunk-states', async (c) => {
+  const taskId = c.req.param('taskId')
+  
+  try {
+    // Get all completed chunks from chunks table
+    const chunksResult = await c.env.DB.prepare(
+      `SELECT DISTINCT chunk_index FROM chunks WHERE task_id = ? ORDER BY chunk_index`
+    ).bind(taskId).all()
+    
+    const completedChunks = chunksResult.results?.map((r: any) => r.chunk_index) || []
+    
+    // Update chunk_states table to mark them as completed
+    let fixed = 0
+    for (const chunkIndex of completedChunks) {
+      await saveChunkState(c.env, taskId, {
+        index: chunkIndex,
+        status: 'completed',
+        attempts: 0,
+        updatedAt: new Date().toISOString()
+      })
+      fixed++
+    }
+    
+    // Delete any stuck chunk_jobs
+    await c.env.DB.prepare(
+      `DELETE FROM chunk_jobs WHERE task_id = ? AND chunk_index IN (${completedChunks.join(',')})`
+    ).bind(taskId).run()
+    
+    await appendTaskLog(c.env, taskId, {
+      level: 'info',
+      message: 'Chunk states fixed by admin',
+      context: {
+        fixedChunks: fixed,
+        completedChunks
+      }
+    })
+    
+    return c.json({ 
+      success: true,
+      fixed,
+      completedChunks
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ error: errorMessage }, 500)
+  }
+})
+
 app.get('/api/test-api-key', (c) => {
   const apiKey = c.env.GEMINI_API_KEY
   return c.json({
