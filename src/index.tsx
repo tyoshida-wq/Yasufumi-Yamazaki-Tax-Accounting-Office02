@@ -528,13 +528,13 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
     chunkRecords.push(record)
   }
 
-  const merged = mergeChunks(chunkRecords)
+  const result = mergeChunks(chunkRecords)
   const now = new Date().toISOString()
   
   // Save transcript to D1
   await c.env.DB.prepare(
     'INSERT OR REPLACE INTO transcripts (task_id, content, created_at) VALUES (?, ?, ?)'
-  ).bind(taskId, merged, now).run()
+  ).bind(taskId, result.merged, now).run()
 
   // Update task status
   await c.env.DB.prepare(
@@ -544,11 +544,16 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
     level: 'info',
     message: 'Transcript merge completed',
     context: {
-      totalChunks: task.totalChunks
+      totalChunks: task.totalChunks,
+      skippedLines: result.debug.skippedLines.length,
+      chunkInfo: result.debug.chunkInfo
     }
   })
 
-  return c.json({ transcript: merged })
+  return c.json({ 
+    transcript: result.merged,
+    debug: result.debug
+  })
 })
 
 app.get('/api/tasks/:taskId/transcript', async (c) => {
@@ -2275,7 +2280,7 @@ async function callGeminiMinutes(
   throw lastError ?? new Error('Gemini Pro API error: Unknown failure')
 }
 
-function mergeChunks(chunks: ChunkRecord[]): string {
+function mergeChunks(chunks: ChunkRecord[]): { merged: string; debug: { skippedLines: Array<{ chunkIndex: number; timestamp: string; threshold: string; line: string }>; chunkInfo: Array<{ index: number; startMs: number; endMs: number; lineCount: number; firstTimestamp: string | null; lastTimestamp: string | null }> } } {
   const sorted = [...chunks].sort((a, b) => a.index - b.index)
   let thresholdMs = 0
   const lines: string[] = []
@@ -2322,6 +2327,23 @@ function mergeChunks(chunks: ChunkRecord[]): string {
     thresholdMs = Math.max(thresholdMs, chunk.startMs)
   }
 
+  // チャンク情報を収集
+  const chunkInfo = sorted.map(chunk => {
+    const chunkLines = chunk.text.split(/\r?\n/)
+    const timestamps = chunkLines
+      .map(line => getTimestampMs(line))
+      .filter((ts): ts is number => ts !== null)
+    
+    return {
+      index: chunk.index,
+      startMs: chunk.startMs,
+      endMs: chunk.endMs,
+      lineCount: chunkLines.length,
+      firstTimestamp: timestamps.length > 0 ? formatTimestampFromMs(timestamps[0]) : null,
+      lastTimestamp: timestamps.length > 0 ? formatTimestampFromMs(timestamps[timestamps.length - 1]) : null
+    }
+  })
+
   // スキップされた発言をログ出力（デバッグ用）
   if (skippedLines.length > 0) {
     console.log(`[mergeChunks] Skipped ${skippedLines.length} overlapping lines:`)
@@ -2330,7 +2352,13 @@ function mergeChunks(chunks: ChunkRecord[]): string {
     })
   }
 
-  return lines.join('\n')
+  return { 
+    merged: lines.join('\n'),
+    debug: {
+      skippedLines,
+      chunkInfo
+    }
+  }
 }
 
 function formatTimestampFromMs(ms: number): string {
@@ -2348,7 +2376,7 @@ function formatTimestampFromMs(ms: number): string {
 function getTimestampMs(line: string): number | null {
   const match = line.match(TIMESTAMP_PATTERN)
   if (!match) return null
-  const [, , hhOrMm, mm, ss] = match
+  const [, hhOrMm, mm, ss] = match
   if (ss) {
     const hours = Number(hhOrMm)
     const minutes = Number(mm)
