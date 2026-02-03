@@ -572,32 +572,33 @@ app.get('/api/tasks/:taskId/transcript', async (c) => {
 app.get('/api/tasks/:taskId/audio', async (c) => {
   const taskId = c.req.param('taskId')
   
-  // Get task info to find the original audio file
+  // Get task info
   const task = await getTask(c.env, taskId)
   if (!task) {
     return c.json({ error: 'Task not found' }, 404)
   }
   
-  // Get first chunk (chunk 0) which contains the original metadata
+  // Get first chunk (chunk 0)
   const chunkResult = await c.env.DB.prepare(
-    'SELECT r2_key, mime_type FROM chunk_jobs WHERE task_id = ? AND chunk_index = 0'
+    'SELECT r2_key, mime_type FROM chunk_jobs WHERE task_id = ? AND chunk_index = 0 LIMIT 1'
   ).bind(taskId).first<{ r2_key: string; mime_type: string }>()
   
-  if (!chunkResult) {
-    return c.json({ error: 'Audio file not found' }, 404)
+  if (!chunkResult || !chunkResult.r2_key) {
+    // Audio chunks not available (old task or no audio stored)
+    return c.json({ 
+      error: 'Audio file not available', 
+      message: 'This task was processed before audio storage was implemented, or audio files have been cleaned up.' 
+    }, 404)
   }
   
-  // Check if we have the complete merged audio file
-  const mergedKey = `${taskId}/merged.webm`
-  let audioObject = await c.env.AUDIO_CHUNKS.get(mergedKey)
+  // Get audio from R2
+  const audioObject = await c.env.AUDIO_CHUNKS.get(chunkResult.r2_key)
   
   if (!audioObject) {
-    // Fallback: return first chunk if merged file doesn't exist
-    audioObject = await c.env.AUDIO_CHUNKS.get(chunkResult.r2_key)
-  }
-  
-  if (!audioObject) {
-    return c.json({ error: 'Audio data not found in storage' }, 404)
+    return c.json({ 
+      error: 'Audio data not found in storage',
+      message: `Expected audio at: ${chunkResult.r2_key}`
+    }, 404)
   }
   
   const headers = new Headers()

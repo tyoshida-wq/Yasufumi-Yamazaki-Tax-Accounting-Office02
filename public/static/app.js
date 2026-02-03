@@ -1716,6 +1716,15 @@ async function loadTaskTranscript(taskId) {
       return
     }
     
+    // Check if audio is available
+    const audioCheckResponse = await fetch(`/api/tasks/${taskId}/audio`, { method: 'HEAD' })
+    if (!audioCheckResponse.ok) {
+      const errorResponse = await fetch(`/api/tasks/${taskId}/audio`)
+      const errorData = await errorResponse.json()
+      alert(errorData.message || errorData.error || '音声ファイルが利用できません')
+      return
+    }
+    
     // Set audio source
     audioSource.src = `/api/tasks/${taskId}/audio`
     audioPlayer.load()
