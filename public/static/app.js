@@ -2138,10 +2138,14 @@ async function showMinutesDetailModal(taskId) {
     
     try {
       const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
+      console.log('Minutes API response status:', minutesResponse.status)
       if (minutesResponse.ok) {
         const minutesData = await minutesResponse.json()
+        console.log('Minutes data keys:', Object.keys(minutesData))
+        console.log('Minutes content length:', (minutesData.content || minutesData.minutes)?.length || 0)
         minutesEl.textContent = minutesData.content || minutesData.minutes || '議事録がまだ生成されていません'
       } else {
+        console.error('Minutes fetch failed:', minutesResponse.status)
         minutesEl.textContent = '議事録がまだ生成されていません'
       }
     } catch (error) {
@@ -2155,10 +2159,14 @@ async function showMinutesDetailModal(taskId) {
     
     try {
       const transcriptResponse = await fetch(`/api/tasks/${taskId}/transcript`)
+      console.log('Transcript API response status:', transcriptResponse.status)
       if (transcriptResponse.ok) {
         const transcriptData = await transcriptResponse.json()
+        console.log('Transcript data keys:', Object.keys(transcriptData))
+        console.log('Transcript content length:', transcriptData.transcript?.length || 0)
         transcriptEl.textContent = transcriptData.transcript || '文字起こしがまだ完了していません'
       } else {
+        console.error('Transcript fetch failed:', transcriptResponse.status)
         transcriptEl.textContent = '文字起こしがまだ完了していません'
       }
     } catch (error) {
