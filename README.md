@@ -73,14 +73,44 @@ Cloudflare Pages + Workers (Hono)
 - `/api/tasks/:taskId/process` 実行時に `reason` とキュー残数をサーバーログへ記録。停滞が続くと `Chunk queue stalled after reprocess attempt` を警告出力。
 
 ## デプロイ状況
-- **本番**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
-- **最新デプロイ ID**: `01134ad1`（2026-02-02 03:15 UTC）
+- **本番URL (Workers)**: https://yasufumi-yamazaki-tax-accounting-office02.t-yoshida.workers.dev
+- **本番URL (Pages)**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
+- **最新デプロイ**: `ca838b2f` / `ef67344`（2026-02-03）
 - **ステータス**: ✅ 稼働中
 - **最近の改善**: 
+  - URLハッシュナビゲーション対応（#history, #admin）
+  - すべてのエラーメッセージを日本語化
+  - オーディオプレイヤー機能を追加
+  - favicon.svg を追加して404エラーを解消
   - `waitUntil()` タイムアウト問題を修正（maxIterations=2 に制限）
   - Cloudflare Workers の実行時間制限を回避
   - クライアント側の自動ポーリングと `/process` エンドポイントで残チャンクを処理
   - 大容量音声ファイルの処理安定性を向上
+
+### デプロイ方法
+このプロジェクトは **Cloudflare Workers** と **Cloudflare Pages** の2つの環境にデプロイされています：
+
+#### Cloudflare Workers デプロイ（推奨）
+```bash
+# フルスタック（API + フロントエンド）をWorkersにデプロイ
+npx wrangler deploy
+```
+- **URL**: https://yasufumi-yamazaki-tax-accounting-office02.t-yoshida.workers.dev
+- **特徴**: D1、R2、Queue などのバインディングがすべて有効
+- **用途**: 本番環境での使用を推奨
+
+#### Cloudflare Pages デプロイ
+```bash
+# ビルド
+npm run build
+
+# 静的ファイルとWorkerをデプロイ
+cp dist/index.js dist/_worker.js
+npx wrangler pages deploy dist --project-name yasufumi-yamazaki-tax-accounting-office02
+```
+- **URL**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
+- **特徴**: プレビューデプロイメント、ブランチごとのURL
+- **用途**: テスト・プレビュー環境
 
 ## フロントエンドフロー
 1. 音声録音またはファイル選択。
