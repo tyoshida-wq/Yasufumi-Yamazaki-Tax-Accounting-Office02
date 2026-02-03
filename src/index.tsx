@@ -2359,17 +2359,17 @@ async function callGeminiMinutes(
     ]
   })
 
-  const url = `${GEMINI_API_BASE}/v1beta/models/${GEMINI_PRO_MODEL}:generateContent?key=${apiKey}`
+  const url = `${GEMINI_API_BASE}/v1beta/models/${GEMINI_FLASH_MODEL}:generateContent?key=${apiKey}`
   let lastError: Error | null = null
 
-  for (let attempt = 1; attempt <= GEMINI_PRO_MAX_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= GEMINI_FLASH_MAX_RETRIES; attempt++) {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), GEMINI_PRO_TIMEOUT_MS)
+    const timeoutId = setTimeout(() => controller.abort(), GEMINI_FLASH_TIMEOUT_MS)
 
     try {
       await appendTaskLog(env, taskId, {
         level: 'info',
-        message: 'Gemini Pro minutes request',
+        message: 'Gemini 2.5 Flash minutes request',
         context: {
           attempt,
           filename,
@@ -2390,12 +2390,12 @@ async function callGeminiMinutes(
         const data = (await response.json()) as GeminiGenerateContentResponse
         const text = extractCandidateText(data)
         if (!text) {
-          throw new Error('Gemini Pro returned no minutes text')
+          throw new Error('Gemini 2.5 Flash returned no minutes text')
         }
         const trimmed = text.trim()
         await appendTaskLog(env, taskId, {
           level: 'info',
-          message: 'Gemini Pro minutes success',
+          message: 'Gemini 2.5 Flash minutes success',
           context: {
             attempt,
             minutesLength: trimmed.length
@@ -2414,21 +2414,21 @@ async function callGeminiMinutes(
         errorMessage: truncateString(errorDetails.message, 200)
       }
 
-      if (!retryable || attempt === GEMINI_PRO_MAX_RETRIES) {
+      if (!retryable || attempt === GEMINI_FLASH_MAX_RETRIES) {
         await appendTaskLog(env, taskId, {
           level: 'error',
-          message: 'Gemini Pro minutes failed',
+          message: 'Gemini 2.5 Flash minutes failed',
           context
         })
-        throw new Error(`Gemini Pro API error: ${response.status} ${errorDetails.message}`)
+        throw new Error(`Gemini 2.5 Flash API error: ${response.status} ${errorDetails.message}`)
       }
 
       await appendTaskLog(env, taskId, {
         level: 'warn',
-        message: 'Gemini Pro minutes retry scheduled',
+        message: 'Gemini 2.5 Flash minutes retry scheduled',
         context
       })
-      lastError = new Error(`Gemini Pro API error: ${response.status} ${errorDetails.message}`)
+      lastError = new Error(`Gemini 2.5 Flash API error: ${response.status} ${errorDetails.message}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       const retryable =
@@ -2436,21 +2436,21 @@ async function callGeminiMinutes(
         error instanceof TypeError ||
         /timeout/i.test(errorMessage)
 
-      if (!retryable || attempt === GEMINI_PRO_MAX_RETRIES) {
+      if (!retryable || attempt === GEMINI_FLASH_MAX_RETRIES) {
         await appendTaskLog(env, taskId, {
           level: 'error',
-          message: 'Gemini Pro minutes exception',
+          message: 'Gemini 2.5 Flash minutes exception',
           context: {
             attempt,
             error: truncateString(errorMessage, 200)
           }
         })
-        throw new Error(`Gemini Pro API error: ${errorMessage}`)
+        throw new Error(`Gemini 2.5 Flash API error: ${errorMessage}`)
       }
 
       await appendTaskLog(env, taskId, {
         level: 'warn',
-        message: 'Gemini Pro minutes transient exception',
+        message: 'Gemini 2.5 Flash minutes transient exception',
         context: {
           attempt,
           error: truncateString(errorMessage, 200)
@@ -2461,12 +2461,12 @@ async function callGeminiMinutes(
       clearTimeout(timeoutId)
     }
 
-    if (attempt < GEMINI_PRO_MAX_RETRIES) {
+    if (attempt < GEMINI_FLASH_MAX_RETRIES) {
       await sleep(getBackoffDelay(attempt))
     }
   }
 
-  throw lastError ?? new Error('Gemini Pro API error: Unknown failure')
+  throw lastError ?? new Error('Gemini 2.5 Flash API error: Unknown failure')
 }
 
 function mergeChunks(chunks: ChunkRecord[]): { merged: string; debug: { skippedLines: Array<{ chunkIndex: number; timestamp: string; threshold: string; line: string }>; chunkInfo: Array<{ index: number; startMs: number; endMs: number; lineCount: number; firstTimestamp: string | null; lastTimestamp: string | null }> } } {
