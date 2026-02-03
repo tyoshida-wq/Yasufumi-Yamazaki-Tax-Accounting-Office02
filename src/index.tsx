@@ -950,6 +950,19 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
     try {
       console.log(`[Queue Consumer] Processing chunk ${chunkIndex} for task ${taskId}`)
       
+      // Step 0: Check if already completed (idempotency for at-least-once delivery)
+      const existingChunk = await getChunk(env, taskId, chunkIndex)
+      if (existingChunk) {
+        console.log(`[Queue Consumer] Chunk ${chunkIndex} already completed, skipping`)
+        await appendTaskLog(env, taskId, {
+          level: 'info',
+          message: 'Chunk processing skipped (already completed)',
+          context: { chunkIndex, reason: 'duplicate_queue_message' }
+        })
+        message.ack()
+        continue
+      }
+      
       // Step 1: Update status to 'processing'
       const now = new Date().toISOString()
       const workerId = crypto.randomUUID()
@@ -969,6 +982,18 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
       // Step 2: Get audio from R2
       const r2Object = await env.AUDIO_CHUNKS.get(r2Key)
       if (!r2Object) {
+        // Double-check if chunk was completed by another worker (race condition)
+        const recheckChunk = await getChunk(env, taskId, chunkIndex)
+        if (recheckChunk) {
+          console.log(`[Queue Consumer] Chunk ${chunkIndex} completed by another worker, skipping`)
+          await appendTaskLog(env, taskId, {
+            level: 'info',
+            message: 'Chunk processing skipped (completed by another worker)',
+            context: { chunkIndex, reason: 'race_condition_resolved' }
+          })
+          message.ack()
+          continue
+        }
         throw new Error(`R2 object not found: ${r2Key}`)
       }
       
@@ -1017,8 +1042,13 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
         updatedAt: completedAt
       })
       
-      // Step 5: Delete from R2 (cleanup)
-      await env.AUDIO_CHUNKS.delete(r2Key)
+      // Step 5: Delete from R2 (cleanup) - safe to delete after successful processing
+      try {
+        await env.AUDIO_CHUNKS.delete(r2Key)
+      } catch (deleteError) {
+        // Log but don't fail if deletion fails (file might already be deleted)
+        console.warn(`[Queue Consumer] R2 delete warning for ${r2Key}:`, deleteError)
+      }
       
       // Step 6: Log success
       await appendTaskLog(env, taskId, {
@@ -1039,8 +1069,24 @@ async function queueHandler(batch: MessageBatch<ChunkJobMessage>, env: Bindings)
     } catch (error) {
       console.error(`[Queue Consumer] Error processing chunk ${chunkIndex}:`, error)
       
-      // Update error in D1
       const errorMessage = error instanceof Error ? error.message : String(error)
+      
+      // If R2 object not found, check if chunk was already completed
+      if (errorMessage.includes('R2 object not found')) {
+        const finalCheck = await getChunk(env, taskId, chunkIndex)
+        if (finalCheck) {
+          console.log(`[Queue Consumer] Chunk ${chunkIndex} already completed (detected in error handler), acknowledging`)
+          await appendTaskLog(env, taskId, {
+            level: 'info',
+            message: 'Chunk processing error resolved (already completed)',
+            context: { chunkIndex, reason: 'duplicate_queue_message_after_completion' }
+          })
+          message.ack()
+          continue
+        }
+      }
+      
+      // Update error in D1
       const errorNow = new Date().toISOString()
       
       await env.DB.prepare(
