@@ -467,6 +467,105 @@
       </div>
     </div>
     
+    <!-- 議事録詳細モーダル -->
+    <div id="minutes-detail-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50" style="display: none;">
+      <div class="bg-white rounded-2xl max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <!-- ヘッダー -->
+        <div class="bg-gradient-to-r from-purple-600 to-blue-600 p-6 text-white">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-2xl font-bold" id="detail-title">会議 2026/2/2 9:35:35</h3>
+            <button id="close-minutes-detail" class="text-white hover:text-gray-200">
+              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="flex items-center gap-4 text-sm">
+            <span class="flex items-center gap-1">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+              </svg>
+              <span id="detail-date"></span>
+            </span>
+            <span class="flex items-center gap-1">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              </svg>
+              <span id="detail-duration"></span>
+            </span>
+          </div>
+        </div>
+        
+        <!-- ボディ（スクロール可能） -->
+        <div class="flex-1 overflow-y-auto p-6">
+          <!-- アクションボタン -->
+          <div class="flex gap-2 mb-4">
+            <button id="detail-play-audio" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-4 rounded flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              再生
+            </button>
+            <button id="detail-reprocess" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold py-2 px-4 rounded flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+              </svg>
+              最初から再処理する
+            </button>
+          </div>
+          
+          <!-- 議事録セクション -->
+          <div class="mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <svg class="w-5 h-5 text-purple-600" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                </svg>
+                議事録
+              </h4>
+              <button id="detail-download-minutes" class="text-blue-600 hover:text-blue-800 text-sm font-semibold flex items-center gap-1">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
+                </svg>
+                ダウンロード
+              </button>
+            </div>
+            <div id="detail-minutes-content" class="prose prose-sm max-w-none bg-purple-50 p-4 rounded-lg whitespace-pre-wrap">
+              議事録を読み込んでいます...
+            </div>
+          </div>
+          
+          <!-- 文字起こし全文セクション（折りたたみ可能） -->
+          <div class="mb-6">
+            <details class="group">
+              <summary class="cursor-pointer list-none">
+                <div class="flex items-center justify-between mb-3">
+                  <h4 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                    文字起こし全文
+                    <svg class="w-4 h-4 text-gray-500 group-open:rotate-180 transition-transform" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M7 10l5 5 5-5z"/>
+                    </svg>
+                  </h4>
+                  <button id="detail-download-transcript" class="text-blue-600 hover:text-blue-800 text-sm font-semibold flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
+                    </svg>
+                    ダウンロード
+                  </button>
+                </div>
+              </summary>
+              <div id="detail-transcript-content" class="prose prose-sm max-w-none bg-blue-50 p-4 rounded-lg whitespace-pre-wrap max-h-96 overflow-y-auto">
+                文字起こしを読み込んでいます...
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <!-- ボトムナビゲーション -->
     <nav class="bottom-nav">
       <a href="#home" class="nav-item active" id="nav-home" data-page="home">
@@ -500,6 +599,6 @@
     <audio id="audio-player" class="hidden"></audio>
     <canvas id="waveform-canvas" class="hidden"></canvas>
     
-    <script type="module" src="/static/app.js?v=20260203100000"></script>
+    <script type="module" src="/static/app.js?v=20260203103000"></script>
   </body>
 </html>

@@ -597,6 +597,50 @@ app.post('/api/tasks/:taskId/merge', async (c) => {
       chunkInfo: result.debug.chunkInfo
     }
   })
+  
+  // Auto-generate minutes after transcript merge
+  try {
+    const apiKey = c.env.GEMINI_API_KEY
+    if (apiKey) {
+      await appendTaskLog(c.env, taskId, {
+        level: 'info',
+        message: 'Auto-generating minutes after transcript merge',
+        context: {}
+      })
+      
+      const minutesContent = await callGeminiMinutes(c.env, taskId, {
+        apiKey,
+        transcript: result.merged,
+        filename: task.filename,
+        durationMs: task.durationMs
+      })
+      
+      await c.env.DB.prepare(
+        'INSERT OR REPLACE INTO minutes (task_id, content, created_at) VALUES (?, ?, ?)'
+      ).bind(taskId, minutesContent, now).run()
+      
+      await c.env.DB.prepare(
+        'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?'
+      ).bind('completed', now, taskId).run()
+      
+      await appendTaskLog(c.env, taskId, {
+        level: 'info',
+        message: 'Minutes auto-generation completed',
+        context: {
+          minutesLength: minutesContent.length
+        }
+      })
+    }
+  } catch (error) {
+    // Log error but don't fail the merge
+    await appendTaskLog(c.env, taskId, {
+      level: 'warn',
+      message: 'Minutes auto-generation failed',
+      context: {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    })
+  }
 
   return c.json({ 
     transcript: result.merged,

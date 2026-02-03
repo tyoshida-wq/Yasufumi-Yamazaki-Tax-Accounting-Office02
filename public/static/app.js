@@ -1708,6 +1708,14 @@ async function loadMeetingHistory() {
       })
     })
     
+    // Add click handler for viewing details
+    document.querySelectorAll('.view-details').forEach(card => {
+      card.addEventListener('click', async (e) => {
+        const taskId = e.currentTarget.dataset.taskId
+        await showMinutesDetailModal(taskId)
+      })
+    })
+    
   } catch (error) {
     console.error('履歴の読み込みエラー:', error)
     meetingList.innerHTML = '<div class="text-center text-red-500 py-8">履歴の読み込みに失敗しました</div>'
@@ -1733,7 +1741,7 @@ function createMeetingCard(task) {
     : '<span class="status-badge processing">処理中</span>'
   
   return `
-    <div class="meeting-card">
+    <div class="meeting-card cursor-pointer hover:shadow-md transition-shadow view-details" data-task-id="${task.id}">
       <div class="flex items-start justify-between mb-2">
         <div class="flex-1">
           <h3 class="font-semibold text-gray-900">会議 ${dateStr}</h3>
@@ -1746,7 +1754,7 @@ function createMeetingCard(task) {
         </div>
         ${statusBadge}
       </div>
-      <div class="flex gap-2 mt-3">
+      <div class="flex gap-2 mt-3" onclick="event.stopPropagation()">
         <button class="play-button flex-1 bg-purple-100 hover:bg-purple-200 text-purple-700 font-semibold py-2 px-4 rounded-lg flex items-center justify-center" data-task-id="${task.id}">
           <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
             <path d="M8 5v14l11-7z"/>
@@ -2080,6 +2088,141 @@ function updateProgressLogs() {
   // サーバーログ（elements.serverLogの内容をコピー）
   if (serverLog && elements.serverLog) {
     serverLog.textContent = elements.serverLog.textContent || SERVER_LOG_EMPTY_TEXT
+  }
+}
+
+// Show minutes detail modal
+async function showMinutesDetailModal(taskId) {
+  try {
+    // Fetch task data
+    const response = await fetch(`/api/tasks?limit=100`)
+    const data = await response.json()
+    const task = (data.tasks || []).find(t => t.id === taskId)
+    
+    if (!task) {
+      alert('タスク情報の取得に失敗しました')
+      return
+    }
+    
+    // Format date and duration
+    const date = new Date(task.createdAt || task.created_at)
+    const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+    
+    const duration = (task.durationMs || task.duration_ms) ? Math.floor((task.durationMs || task.duration_ms) / 1000) : 0
+    const hours = Math.floor(duration / 3600)
+    const minutes = Math.floor((duration % 3600) / 60)
+    const seconds = duration % 60
+    const durationStr = hours > 0 
+      ? `${hours}時間${minutes}分${seconds}秒`
+      : `${minutes}分${seconds}秒`
+    
+    // Update modal content
+    document.getElementById('detail-title').textContent = `会議 ${dateStr}`
+    document.getElementById('detail-date').textContent = dateStr
+    document.getElementById('detail-duration').textContent = durationStr
+    
+    // Fetch minutes
+    const minutesEl = document.getElementById('detail-minutes-content')
+    minutesEl.textContent = '議事録を読み込んでいます...'
+    
+    try {
+      const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
+      if (minutesResponse.ok) {
+        const minutesData = await minutesResponse.json()
+        minutesEl.textContent = minutesData.minutes || '議事録がまだ生成されていません'
+      } else {
+        minutesEl.textContent = '議事録がまだ生成されていません'
+      }
+    } catch (error) {
+      console.error('議事録の読み込みエラー:', error)
+      minutesEl.textContent = '議事録の読み込みに失敗しました'
+    }
+    
+    // Fetch transcript
+    const transcriptEl = document.getElementById('detail-transcript-content')
+    transcriptEl.textContent = '文字起こしを読み込んでいます...'
+    
+    try {
+      const transcriptResponse = await fetch(`/api/tasks/${taskId}/transcript`)
+      if (transcriptResponse.ok) {
+        const transcriptData = await transcriptResponse.json()
+        transcriptEl.textContent = transcriptData.transcript || '文字起こしがまだ完了していません'
+      } else {
+        transcriptEl.textContent = '文字起こしがまだ完了していません'
+      }
+    } catch (error) {
+      console.error('文字起こしの読み込みエラー:', error)
+      transcriptEl.textContent = '文字起こしの読み込みに失敗しました'
+    }
+    
+    // Setup event handlers
+    document.getElementById('detail-play-audio').onclick = () => {
+      document.getElementById('minutes-detail-modal').style.display = 'none'
+      loadTaskTranscript(taskId)
+    }
+    
+    document.getElementById('detail-reprocess').onclick = async () => {
+      if (confirm('このタスクを最初から再処理しますか？\n既存のデータは削除されます。')) {
+        try {
+          const reprocessResponse = await fetch(`/api/tasks/${taskId}/process?reason=manual`, {
+            method: 'POST'
+          })
+          if (reprocessResponse.ok) {
+            alert('再処理を開始しました')
+            document.getElementById('minutes-detail-modal').style.display = 'none'
+            window.location.hash = 'progress'
+            state.taskId = taskId
+            startStatusPolling()
+          } else {
+            alert('再処理の開始に失敗しました')
+          }
+        } catch (error) {
+          console.error('再処理エラー:', error)
+          alert('再処理の開始に失敗しました')
+        }
+      }
+    }
+    
+    document.getElementById('detail-download-minutes').onclick = async () => {
+      try {
+        const minutesResponse = await fetch(`/api/tasks/${taskId}/minutes`)
+        if (minutesResponse.ok) {
+          const minutesData = await minutesResponse.json()
+          downloadText(minutesData.minutes || '', `minutes-${taskId}.md`)
+        } else {
+          alert('議事録のダウンロードに失敗しました')
+        }
+      } catch (error) {
+        console.error('議事録ダウンロードエラー:', error)
+        alert('議事録のダウンロードに失敗しました')
+      }
+    }
+    
+    document.getElementById('detail-download-transcript').onclick = async () => {
+      try {
+        const transcriptResponse = await fetch(`/api/tasks/${taskId}/transcript`)
+        if (transcriptResponse.ok) {
+          const transcriptData = await transcriptResponse.json()
+          downloadText(transcriptData.transcript || '', `transcript-${taskId}.txt`)
+        } else {
+          alert('文字起こしのダウンロードに失敗しました')
+        }
+      } catch (error) {
+        console.error('文字起こしダウンロードエラー:', error)
+        alert('文字起こしのダウンロードに失敗しました')
+      }
+    }
+    
+    document.getElementById('close-minutes-detail').onclick = () => {
+      document.getElementById('minutes-detail-modal').style.display = 'none'
+    }
+    
+    // Show modal
+    document.getElementById('minutes-detail-modal').style.display = 'flex'
+    
+  } catch (error) {
+    console.error('モーダル表示エラー:', error)
+    alert('詳細の表示に失敗しました')
   }
 }
 
