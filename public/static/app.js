@@ -2182,19 +2182,43 @@ async function showMinutesDetailModal(taskId) {
     }
     
     document.getElementById('detail-reprocess').onclick = async () => {
-      if (confirm('このタスクを最初から再処理しますか？\n既存のデータは削除されます。')) {
+      if (confirm('このタスクを最初から再処理しますか？\n\n元の音声ファイルから完全に再処理します。\n既存のデータは削除されます。')) {
         try {
-          const reprocessResponse = await fetch(`/api/tasks/${taskId}/process?reason=manual`, {
+          const reprocessResponse = await fetch(`/api/tasks/${taskId}/reprocess`, {
             method: 'POST'
           })
-          if (reprocessResponse.ok) {
-            alert('再処理を開始しました')
-            document.getElementById('minutes-detail-modal').style.display = 'none'
-            window.location.hash = 'progress'
-            state.taskId = taskId
-            startStatusPolling()
+          const result = await reprocessResponse.json()
+          
+          if (reprocessResponse.ok && result.hasOriginalAudio) {
+            // Get original audio from R2
+            const audioResponse = await fetch(`/api/tasks/${taskId}/audio`)
+            if (audioResponse.ok) {
+              const audioBlob = await audioResponse.blob()
+              const audioFile = new File([audioBlob], result.audioInfo.filename || 'audio.webm', {
+                type: audioBlob.type
+              })
+              
+              // Set the file as selected and start processing
+              state.selectedFile = audioFile
+              state.selectedSource = 'file'
+              
+              // Close modal and start processing
+              document.getElementById('minutes-detail-modal').style.display = 'none'
+              
+              // Show file summary
+              elements.fileSummary.textContent = `選択: ${audioFile.name} (${(audioFile.size / 1024 / 1024).toFixed(2)} MB)`
+              elements.startProcessing.disabled = false
+              elements.startProcessing.classList.remove('opacity-50', 'cursor-not-allowed')
+              
+              // Auto-start processing
+              if (confirm('元の音声ファイルを取得しました。\n再処理を開始しますか？')) {
+                await processAudioFile(audioFile)
+              }
+            } else {
+              alert('元の音声ファイルの取得に失敗しました')
+            }
           } else {
-            alert('再処理の開始に失敗しました')
+            alert(result.error || '再処理の開始に失敗しました')
           }
         } catch (error) {
           console.error('再処理エラー:', error)

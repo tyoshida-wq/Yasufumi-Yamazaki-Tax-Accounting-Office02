@@ -939,6 +939,58 @@ app.delete('/api/tasks/:taskId', async (c) => {
   }
 })
 
+// Reprocess task from scratch (delete and return original audio info for re-upload)
+app.post('/api/tasks/:taskId/reprocess', async (c) => {
+  const taskId = c.req.param('taskId')
+  
+  try {
+    // Check if task exists
+    const task = await getTask(c.env, taskId)
+    if (!task) {
+      return c.json({ error: 'タスクが見つかりません' }, 404)
+    }
+    
+    // Get original audio info before deletion
+    const audioInfo = {
+      filename: task.filename,
+      durationMs: task.duration_ms
+    }
+    
+    // Check if original audio exists in R2
+    const originalAudioKey = `${taskId}/merged.webm`
+    const originalAudio = await c.env.AUDIO_CHUNKS.get(originalAudioKey)
+    
+    if (!originalAudio) {
+      return c.json({ 
+        error: '元の音声ファイルが見つかりません。再アップロードが必要です。' 
+      }, 404)
+    }
+    
+    // Delete all task data
+    await c.env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(taskId).run()
+    
+    await appendTaskLog(c.env, taskId, {
+      level: 'info',
+      message: 'Task reprocess initiated by user'
+    }).catch(() => {})
+    
+    return c.json({ 
+      success: true,
+      message: 'タスクを削除しました。元の音声ファイルから再処理を開始してください。',
+      audioInfo,
+      hasOriginalAudio: true,
+      originalAudioUrl: `/api/tasks/${taskId}/audio`
+    })
+  } catch (error) {
+    console.error('Failed to reprocess task:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ 
+      error: 'Failed to reprocess task',
+      details: errorMessage
+    }, 500)
+  }
+})
+
 app.get('/api/tasks', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
   
