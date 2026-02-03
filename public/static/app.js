@@ -1625,7 +1625,6 @@ async function loadMeetingHistory() {
       btn.addEventListener('click', async (e) => {
         const taskId = e.currentTarget.dataset.taskId
         await loadTaskTranscript(taskId)
-        showPage('home')
       })
     })
     
@@ -1696,21 +1695,43 @@ function createMeetingCard(task) {
 
 async function loadTaskTranscript(taskId) {
   try {
-    const response = await fetch(`/api/tasks/${taskId}/transcript`)
-    if (!response.ok) throw new Error('文字起こしの取得に失敗しました')
-    
+    // Get task info for display
+    const response = await fetch(`/api/tasks?limit=100`)
     const data = await response.json()
-    state.transcript = data.transcript || ''
-    state.taskId = taskId
+    const task = (data.tasks || []).find(t => t.id === taskId)
     
-    if (elements.transcriptOutput) {
-      elements.transcriptOutput.textContent = state.transcript || 'まだ文字起こしは完了していません。'
+    if (!task) {
+      alert('タスク情報の取得に失敗しました')
+      return
     }
     
-    alert('文字起こしを読み込みました')
+    // Show audio player modal
+    const modal = document.getElementById('audio-player-modal')
+    const audioPlayer = document.getElementById('modal-audio-player')
+    const audioSource = document.getElementById('modal-audio-source')
+    const playerDate = document.getElementById('player-date')
+    
+    if (!modal || !audioPlayer || !audioSource) {
+      alert('プレイヤーの初期化に失敗しました')
+      return
+    }
+    
+    // Set audio source
+    audioSource.src = `/api/tasks/${taskId}/audio`
+    audioPlayer.load()
+    
+    // Set task info
+    const date = new Date(task.createdAt || task.created_at)
+    const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    playerDate.textContent = dateStr
+    
+    // Show modal
+    modal.style.display = 'flex'
+    modal.classList.remove('hidden')
+    
   } catch (error) {
-    console.error('文字起こしの読み込みエラー:', error)
-    alert('文字起こしの読み込みに失敗しました')
+    console.error('音声の読み込みエラー:', error)
+    alert('音声の読み込みに失敗しました')
   }
 }
 
@@ -1821,6 +1842,30 @@ const refreshErrorsBtn = document.getElementById('refresh-errors')
 if (refreshErrorsBtn) {
   refreshErrorsBtn.addEventListener('click', () => {
     loadAdminErrors()
+  })
+}
+
+// Audio player modal controls
+const closePlayerBtn = document.getElementById('close-player')
+const audioPlayerModal = document.getElementById('audio-player-modal')
+const modalAudioPlayer = document.getElementById('modal-audio-player')
+
+if (closePlayerBtn && audioPlayerModal && modalAudioPlayer) {
+  closePlayerBtn.addEventListener('click', () => {
+    modalAudioPlayer.pause()
+    modalAudioPlayer.currentTime = 0
+    audioPlayerModal.style.display = 'none'
+    audioPlayerModal.classList.add('hidden')
+  })
+  
+  // Close modal when clicking outside
+  audioPlayerModal.addEventListener('click', (e) => {
+    if (e.target === audioPlayerModal) {
+      modalAudioPlayer.pause()
+      modalAudioPlayer.currentTime = 0
+      audioPlayerModal.style.display = 'none'
+      audioPlayerModal.classList.add('hidden')
+    }
   })
 }
 

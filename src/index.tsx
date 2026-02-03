@@ -568,6 +568,47 @@ app.get('/api/tasks/:taskId/transcript', async (c) => {
   return c.json({ transcript: result.content })
 })
 
+// Get original audio file for playback
+app.get('/api/tasks/:taskId/audio', async (c) => {
+  const taskId = c.req.param('taskId')
+  
+  // Get task info to find the original audio file
+  const task = await getTask(c.env, taskId)
+  if (!task) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
+  
+  // Get first chunk (chunk 0) which contains the original metadata
+  const chunkResult = await c.env.DB.prepare(
+    'SELECT r2_key, mime_type FROM chunk_jobs WHERE task_id = ? AND chunk_index = 0'
+  ).bind(taskId).first<{ r2_key: string; mime_type: string }>()
+  
+  if (!chunkResult) {
+    return c.json({ error: 'Audio file not found' }, 404)
+  }
+  
+  // Check if we have the complete merged audio file
+  const mergedKey = `${taskId}/merged.webm`
+  let audioObject = await c.env.AUDIO_CHUNKS.get(mergedKey)
+  
+  if (!audioObject) {
+    // Fallback: return first chunk if merged file doesn't exist
+    audioObject = await c.env.AUDIO_CHUNKS.get(chunkResult.r2_key)
+  }
+  
+  if (!audioObject) {
+    return c.json({ error: 'Audio data not found in storage' }, 404)
+  }
+  
+  const headers = new Headers()
+  headers.set('Content-Type', chunkResult.mime_type || 'audio/webm')
+  headers.set('Content-Length', String(audioObject.size))
+  headers.set('Accept-Ranges', 'bytes')
+  headers.set('Cache-Control', 'public, max-age=31536000')
+  
+  return new Response(audioObject.body, { headers })
+})
+
 app.post('/api/tasks/:taskId/minutes', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
