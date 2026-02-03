@@ -216,6 +216,54 @@ app.post('/api/tasks', async (c) => {
   return c.json({ task })
 })
 
+// Upload original audio file to R2
+app.post('/api/tasks/:taskId/original-audio', async (c) => {
+  const taskId = c.req.param('taskId')
+  
+  const task = await getTask(c.env, taskId)
+  if (!task) {
+    return c.json({ error: 'タスクが見つかりません' }, 404)
+  }
+  
+  const formData = await c.req.formData().catch(() => null)
+  if (!formData) {
+    return c.json({ error: '無効なmultipart/form-dataペイロードです' }, 400)
+  }
+  
+  const audio = formData.get('audio')
+  if (!(audio instanceof File)) {
+    return c.json({ error: '音声ファイルが必要です' }, 400)
+  }
+  
+  // Save original audio to R2
+  const r2Key = `${taskId}/merged.webm`
+  const audioBuffer = await audio.arrayBuffer()
+  
+  await c.env.AUDIO_CHUNKS.put(r2Key, audioBuffer, {
+    httpMetadata: {
+      contentType: audio.type || 'audio/webm'
+    },
+    customMetadata: {
+      taskId,
+      filename: task.filename || audio.name,
+      sizeBytes: String(audio.size),
+      uploadedAt: new Date().toISOString()
+    }
+  })
+  
+  await appendTaskLog(c.env, taskId, {
+    level: 'info',
+    message: 'Original audio file uploaded to R2',
+    context: {
+      r2Key,
+      sizeBytes: audio.size,
+      contentType: audio.type
+    }
+  })
+  
+  return c.json({ success: true, r2Key })
+})
+
 app.get('/api/tasks/:taskId/status', async (c) => {
   const taskId = c.req.param('taskId')
   const task = await getTask(c.env, taskId)
@@ -578,7 +626,21 @@ app.get('/api/tasks/:taskId/audio', async (c) => {
     return c.json({ error: 'タスクが見つかりません' }, 404)
   }
   
-  // Get first chunk (chunk 0)
+  // Try to get merged audio file first
+  const mergedR2Key = `${taskId}/merged.webm`
+  const mergedAudio = await c.env.AUDIO_CHUNKS.get(mergedR2Key)
+  
+  if (mergedAudio) {
+    const headers = new Headers()
+    headers.set('Content-Type', 'audio/webm')
+    headers.set('Content-Length', String(mergedAudio.size))
+    headers.set('Accept-Ranges', 'bytes')
+    headers.set('Cache-Control', 'public, max-age=31536000')
+    
+    return new Response(mergedAudio.body, { headers })
+  }
+  
+  // If no merged audio, try to get first chunk (chunk 0)
   const chunkResult = await c.env.DB.prepare(
     'SELECT r2_key, mime_type FROM chunk_jobs WHERE task_id = ? AND chunk_index = 0 LIMIT 1'
   ).bind(taskId).first<{ r2_key: string; mime_type: string }>()

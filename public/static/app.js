@@ -426,6 +426,29 @@ async function processAudioFile(file) {
     state.taskId = task.id
     state.latestStatus = null
     logStatus(`タスク ${state.taskId} を作成しました。`)
+    
+    // Upload original audio file to R2 for playback
+    try {
+      logStatus('元の音声ファイルを保存中...')
+      const formData = new FormData()
+      formData.append('audio', file)
+      
+      const uploadResponse = await fetch(`/api/tasks/${state.taskId}/original-audio`, {
+        method: 'POST',
+        body: formData
+      })
+      
+      if (uploadResponse.ok) {
+        logStatus('音声ファイルの保存が完了しました。')
+      } else {
+        console.warn('Failed to upload original audio:', await uploadResponse.text())
+        logStatus('音声ファイルの保存に失敗しましたが、処理は続行します。')
+      }
+    } catch (error) {
+      console.warn('Failed to upload original audio:', error)
+      logStatus('音声ファイルの保存に失敗しましたが、処理は続行します。')
+    }
+    
     startStatusPolling(state.taskId)
     await fetchTaskLogs(state.taskId)
     elements.progressSummary.textContent = `処理開始: 0 / ${state.totalChunks} チャンク`
