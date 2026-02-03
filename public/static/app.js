@@ -2143,7 +2143,8 @@ async function showMinutesDetailModal(taskId) {
         const minutesData = await minutesResponse.json()
         console.log('Minutes data keys:', Object.keys(minutesData))
         console.log('Minutes content length:', (minutesData.content || minutesData.minutes)?.length || 0)
-        minutesEl.textContent = minutesData.content || minutesData.minutes || '議事録がまだ生成されていません'
+        const minutesContent = minutesData.content || minutesData.minutes || '議事録がまだ生成されていません'
+        minutesEl.innerHTML = convertMarkdownToHTML(minutesContent)
       } else {
         console.error('Minutes fetch failed:', minutesResponse.status)
         minutesEl.textContent = '議事録がまだ生成されていません'
@@ -2260,4 +2261,47 @@ if (typeof window !== 'undefined') {
       showPage(hash)
     }
   })
+}
+
+// Simple Markdown to HTML converter
+function convertMarkdownToHTML(markdown) {
+  if (!markdown) return ''
+  
+  let html = markdown
+  
+  // Headers
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
+  
+  // Bold
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  
+  // Italic
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>')
+  
+  // Lists - bullet points
+  html = html.replace(/^\* (.*$)/gim, '<li>$1</li>')
+  html = html.replace(/^• (.*$)/gim, '<li>$1</li>')
+  html = html.replace(/^- (.*$)/gim, '<li>$1</li>')
+  
+  // Wrap consecutive list items in ul
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+  
+  // Tables
+  const tableRegex = /\|(.+)\|\n\|[\s\-:]+\|\n((?:\|.+\|\n?)+)/g
+  html = html.replace(tableRegex, (match, header, rows) => {
+    const headers = header.split('|').filter(h => h.trim()).map(h => `<th>${h.trim()}</th>`).join('')
+    const rowsHtml = rows.trim().split('\n').map(row => {
+      const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('')
+      return `<tr>${cells}</tr>`
+    }).join('')
+    return `<table><thead><tr>${headers}</tr></thead><tbody>${rowsHtml}</tbody></table>`
+  })
+  
+  // Line breaks
+  html = html.replace(/\n\n/g, '<br><br>')
+  html = html.replace(/\n/g, '<br>')
+  
+  return html
 }
