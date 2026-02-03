@@ -4,15 +4,16 @@
 - **名称**: webapp
 - **目的**: 税理士事務所の定例会議や顧問先との打合せ録音から、タイムスタンプ付き全文文字起こしと議事録を自動生成する。
 - **対象**: 最長3時間（約180分）の音声データ。
-- **キーモデル**: 文字起こしに *Gemini 3.0 Flash Preview*、議事録生成に *Gemini 3.0 Pro Preview* を使用。
+- **キーモデル**: 文字起こしと議事録生成の両方に **Gemini 2.5 Flash** を使用（高速・経済的）。
 
 ## 主な機能
 - ブラウザ内録音（MediaRecorder）と既存音声ファイルのアップロードに対応。
-- フロントエンドで約 1MB ごとに音声を分割し、5 秒のオーバーラップを付与したチャンクを生成。
-- 各チャンクは Cloudflare Workers (Hono) の非同期キューに投入され、Gemini 3.0 Flash Preview を最大 4 並列で呼び出してタイムスタンプ付き文字起こし。
-- タイムスタンプを基準にチャンク結果を再結合し、全文を Cloudflare KV に保存。
-- Gemini 3.0 Pro Preview で税理士事務所向け議事録テンプレート（概要/決定事項/TODO/リスク/フォローアップ/重要タイムライン）を生成。
-- Gemini API 呼び出しにタイムアウトと指数バックオフ付きリトライ（Flash 最大4回 / Pro 最大3回）を適用。
+- フロントエンドで約 2MB ごとに音声を分割し、5 秒のオーバーラップを付与したチャンクを生成。
+- 各チャンクは Cloudflare Workers (Hono) の非同期キューに投入され、Gemini 2.5 Flash を最大 2 並列で呼び出してタイムスタンプ付き文字起こし。
+- タイムスタンプを基準にチャンク結果を再結合し、全文を Cloudflare D1 に保存。
+- 文字起こし完了後、自動的に Gemini 2.5 Flash で税理士事務所向け議事録テンプレート（📋要約/💡議題/✅決定事項/📝TODO/⚠️リスク/🔄フォローアップ/⏰タイムライン）を生成。
+- Gemini API 呼び出しにタイムアウト（120秒）と指数バックオフ付きリトライ（最大4回）を適用。
+- Queue重複配信（at-least-once delivery）に対する idempotency チェックを実装し、R2エラーを防止。
 - 文字起こし全文および議事録のコピー、ダウンロード (TXT/Markdown) に対応。
 - フロントエンドで進捗ログ・APIレスポンス、キュー状態（待機/処理中/完了/エラー）・サーバーログをリアルタイム表示。
 - 約 6 秒ごとに `/status` をポーリングし、未処理チャンクの再処理・結合再試行ボタンを自動表示することでリカバリを支援。
@@ -55,14 +56,18 @@ Cloudflare Pages + Workers (Hono)
 | メソッド | パス | 用途 |
 |----------|------|------|
 | `POST` | `/api/tasks` | 新規タスク作成（チャンク総数・ファイル情報） |
+| `GET` | `/api/tasks` | タスク一覧取得（limit指定可、議事録有無フラグ付き） |
 | `GET` | `/api/tasks/:taskId/status` | 処理状況、全文/議事録の有無を返却 |
 | `POST` | `/api/tasks/:taskId/chunks` | チャンク音声を送信し、Gemini Flash で文字起こし |
-| `POST` | `/api/tasks/:taskId/process` | キューに残るチャンクの処理をトリガー。`?reason=manual|auto` を指定可能 |
-| `GET` | `/api/tasks/:taskId/logs` | タスクごとのサーバーログ（最新60件まで）を取得 |
-| `POST` | `/api/tasks/:taskId/merge` | チャンク全文をタイムスタンプ基準で結合（未完了時は409 + chunkSummary を返却） |
+| `POST` | `/api/tasks/:taskId/process` | キューに残るチャンクの処理をトリガー。`?reason=manual\|auto` を指定可能 |
+| `POST` | `/api/tasks/:taskId/fix-chunk-states` | **管理用**: chunk_statesの不整合を修正 |
+| `GET` | `/api/tasks/:taskId/logs` | タスクごとのサーバーログ（最新200件まで）を取得 |
+| `POST` | `/api/tasks/:taskId/merge` | チャンク全文をタイムスタンプ基準で結合、自動議事録生成 |
 | `GET` | `/api/tasks/:taskId/transcript` | 結合済み全文を取得 |
-| `POST` | `/api/tasks/:taskId/minutes` | Gemini Pro で議事録生成 |
 | `GET` | `/api/tasks/:taskId/minutes` | 生成済み議事録を取得 |
+| `POST` | `/api/tasks/:taskId/original-audio` | 元音声ファイルをR2に保存（再生用） |
+| `GET` | `/api/tasks/:taskId/audio` | R2から元音声ファイルを取得 |
+| `DELETE` | `/api/tasks/:taskId` | タスクとすべての関連データを削除 |
 | `GET` | `/api/config` | クライアント設定（チャンクサイズ・並列数など）を取得 |
 | `GET` | `/api/healthz` | 簡易ヘルスチェック |
 
@@ -75,17 +80,18 @@ Cloudflare Pages + Workers (Hono)
 ## デプロイ状況
 - **本番URL (Workers)**: https://yasufumi-yamazaki-tax-accounting-office02.t-yoshida.workers.dev
 - **本番URL (Pages)**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
-- **最新デプロイ**: `ca838b2f` / `ef67344`（2026-02-03）
+- **最新デプロイ**: `36c26e7` / `8522e337`（2026-02-03）
 - **ステータス**: ✅ 稼働中
 - **最近の改善**: 
+  - **Queue重複配信への対応**: at-least-once delivery による重複メッセージを処理開始時にチェック
+  - **R2削除の安全化**: R2オブジェクト削除時のエラーを無視してリトライを防止
+  - **チャンク状態の自動修正**: `/api/tasks/:taskId/fix-chunk-states` エンドポイント追加
+  - **議事録モデル変更**: Gemini 2.5 Flash で自動生成（高速・経済的）
+  - **議事録UIの改善**: 絵文字セクション、HTMLレンダリング、紫デザインテーマ
+  - **履歴ページ改善**: 議事録有無インジケーター、詳細モーダル表示
   - URLハッシュナビゲーション対応（#history, #admin）
   - すべてのエラーメッセージを日本語化
-  - オーディオプレイヤー機能を追加
-  - favicon.svg を追加して404エラーを解消
-  - `waitUntil()` タイムアウト問題を修正（maxIterations=2 に制限）
-  - Cloudflare Workers の実行時間制限を回避
-  - クライアント側の自動ポーリングと `/process` エンドポイントで残チャンクを処理
-  - 大容量音声ファイルの処理安定性を向上
+  - favicon更新（青い人物アイコン）
 
 ### デプロイ方法
 このプロジェクトは **Cloudflare Workers** と **Cloudflare Pages** の2つの環境にデプロイされています：
