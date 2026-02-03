@@ -139,53 +139,67 @@ if (elements.serverLog) {
 applyRuntimeConfigToUI()
 void loadRuntimeConfig()
 
-elements.fileInput.addEventListener('change', (event) => {
-  const file = event.target.files?.[0]
-  if (file) {
-    setSelectedFile(file, 'アップロード')
-  }
-})
-
-elements.startProcessing.addEventListener('click', async () => {
-  if (!state.selectedFile || state.isProcessing) return
-  await processAudioFile(state.selectedFile)
-})
-
-elements.generateMinutes.addEventListener('click', async () => {
-  if (!state.taskId) return
-  try {
-    await generateMinutes()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '議事録生成時にエラーが発生しました'
-    logStatus(message, 'error')
-    console.error(error)
-    if (state.taskId) {
-      await fetchTaskLogs(state.taskId)
+if (elements.fileInput) {
+  elements.fileInput.addEventListener('change', (event) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      setSelectedFile(file, 'アップロード')
     }
-  }
-})
+  })
+}
 
-elements.downloadTranscript.addEventListener('click', () => {
-  if (!state.transcript) return
-  downloadText(state.transcript, 'transcript.txt')
-})
+if (elements.startProcessing) {
+  elements.startProcessing.addEventListener('click', async () => {
+    if (!state.selectedFile || state.isProcessing) return
+    await processAudioFile(state.selectedFile)
+  })
+}
 
-elements.downloadMinutes.addEventListener('click', () => {
-  if (!state.minutes) return
-  downloadText(state.minutes, 'minutes.md')
-})
+if (elements.generateMinutes) {
+  elements.generateMinutes.addEventListener('click', async () => {
+    if (!state.taskId) return
+    try {
+      await generateMinutes()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '議事録生成時にエラーが発生しました'
+      logStatus(message, 'error')
+      console.error(error)
+      if (state.taskId) {
+        await fetchTaskLogs(state.taskId)
+      }
+    }
+  })
+}
 
-elements.copyTranscript.addEventListener('click', async () => {
-  if (!state.transcript) return
-  await navigator.clipboard.writeText(state.transcript)
-  flashCopied(elements.copyTranscript)
-})
+if (elements.downloadTranscript) {
+  elements.downloadTranscript.addEventListener('click', () => {
+    if (!state.transcript) return
+    downloadText(state.transcript, 'transcript.txt')
+  })
+}
 
-elements.copyMinutes.addEventListener('click', async () => {
-  if (!state.minutes) return
-  await navigator.clipboard.writeText(state.minutes)
-  flashCopied(elements.copyMinutes)
-})
+if (elements.downloadMinutes) {
+  elements.downloadMinutes.addEventListener('click', () => {
+    if (!state.minutes) return
+    downloadText(state.minutes, 'minutes.md')
+  })
+}
+
+if (elements.copyTranscript) {
+  elements.copyTranscript.addEventListener('click', async () => {
+    if (!state.transcript) return
+    await navigator.clipboard.writeText(state.transcript)
+    flashCopied(elements.copyTranscript)
+  })
+}
+
+if (elements.copyMinutes) {
+  elements.copyMinutes.addEventListener('click', async () => {
+    if (!state.minutes) return
+    await navigator.clipboard.writeText(state.minutes)
+    flashCopied(elements.copyMinutes)
+  })
+}
 
 if (elements.triggerReprocess) {
   elements.triggerReprocess.addEventListener('click', async () => {
@@ -199,10 +213,18 @@ if (elements.retryMerge) {
   })
 }
 
-elements.recordStart.addEventListener('click', startRecording)
-elements.recordStop.addEventListener('click', stopRecording)
-elements.clearAudio.addEventListener('click', clearAudioPlayer)
-elements.refreshHistory.addEventListener('click', loadTaskHistory)
+if (elements.recordStart) {
+  elements.recordStart.addEventListener('click', startRecording)
+}
+if (elements.recordStop) {
+  elements.recordStop.addEventListener('click', stopRecording)
+}
+if (elements.clearAudio) {
+  elements.clearAudio.addEventListener('click', clearAudioPlayer)
+}
+if (elements.refreshHistory) {
+  elements.refreshHistory.addEventListener('click', loadTaskHistory)
+}
 
 setupDragAndDrop()
 loadTaskHistory()
@@ -1516,197 +1538,62 @@ async function loadTaskDetails(taskId) {
 }
 
 // ========================================
-// 新UI対応: ページナビゲーション
+// 新UI: ナビゲーション処理
 // ========================================
 
 const pages = {
-  home: document.getElementById('home-page'),
-  history: document.getElementById('history-page'),
-  admin: document.getElementById('admin-page')
+  home: document.getElementById('page-home'),
+  history: document.getElementById('page-history'),
+  admin: document.getElementById('page-admin')
 }
 
-const navItems = document.querySelectorAll('.nav-item')
+const navButtons = {
+  home: document.getElementById('nav-home'),
+  history: document.getElementById('nav-history'),
+  admin: document.getElementById('nav-admin')
+}
 
 function showPage(pageName) {
-  // すべてのページを非表示
-  Object.values(pages).forEach(page => {
-    if (page) page.classList.remove('active')
+  Object.keys(pages).forEach(key => {
+    if (pages[key]) {
+      pages[key].classList.add('hidden')
+    }
   })
   
-  // 指定されたページを表示
+  Object.keys(navButtons).forEach(key => {
+    if (navButtons[key]) {
+      navButtons[key].classList.remove('active')
+    }
+  })
+  
   if (pages[pageName]) {
-    pages[pageName].classList.add('active')
+    pages[pageName].classList.remove('hidden')
   }
   
-  // ナビゲーションのアクティブ状態を更新
-  navItems.forEach(item => {
-    item.classList.remove('active')
-    if (item.dataset.page === pageName) {
-      item.classList.add('active')
-    }
-  })
+  if (navButtons[pageName]) {
+    navButtons[pageName].classList.add('active')
+  }
+  
+  if (pageName === 'history') {
+    loadMeetingHistory()
+  } else if (pageName === 'admin') {
+    loadAdminErrors()
+  }
 }
 
-// ナビゲーションクリックイベント
-navItems.forEach(item => {
-  item.addEventListener('click', (e) => {
-    e.preventDefault()
-    const pageName = item.dataset.page
-    showPage(pageName)
-    
-    // 履歴ページを表示したら履歴を読み込む
-    if (pageName === 'history') {
-      loadTaskHistory()
-    }
-    
-    // 管理ページを表示したらエラーログを読み込む
-    if (pageName === 'admin') {
-      loadErrorLogs()
-    }
-  })
+Object.keys(navButtons).forEach(key => {
+  if (navButtons[key]) {
+    navButtons[key].addEventListener('click', (e) => {
+      e.preventDefault()
+      showPage(key)
+    })
+  }
 })
 
-// ========================================
-// 録音ボタン処理
-// ========================================
-
-const recordButton = document.getElementById('record-button')
-const recordText = document.getElementById('record-text')
-const recordTimerContainer = document.getElementById('record-timer-container')
-
-if (recordButton) {
-  recordButton.addEventListener('click', async () => {
-    if (!state.mediaRecorder || state.mediaRecorder.state === 'inactive') {
-      // 録音開始
-      await startRecording()
-    } else {
-      // 録音停止
-      await stopRecording()
-    }
-  })
-}
-
-async function startRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    state.mediaStream = stream
-    state.mediaRecorder = new MediaRecorder(stream)
-    state.recordedChunks = []
-    
-    state.mediaRecorder.addEventListener('dataavailable', (e) => {
-      if (e.data.size > 0) {
-        state.recordedChunks.push(e.data)
-      }
-    })
-    
-    state.mediaRecorder.addEventListener('stop', () => {
-      const blob = new Blob(state.recordedChunks, { type: 'audio/webm' })
-      state.selectedFile = blob
-      state.selectedSource = 'recording'
-      
-      // 録音完了後、処理開始画面に遷移
-      showPage('home')
-      startProcessingAudio()
-    })
-    
-    state.mediaRecorder.start()
-    state.recordStartedAt = Date.now()
-    
-    // UI更新
-    recordButton.classList.add('recording')
-    recordText.textContent = '停止'
-    recordTimerContainer.classList.remove('hidden')
-    
-    // タイマー開始
-    startRecordTimer()
-    
-  } catch (error) {
-    console.error('録音開始エラー:', error)
-    alert('マイクへのアクセスが拒否されました')
-  }
-}
-
-async function stopRecording() {
-  if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
-    state.mediaRecorder.stop()
-    
-    if (state.mediaStream) {
-      state.mediaStream.getTracks().forEach(track => track.stop())
-      state.mediaStream = null
-    }
-    
-    // UI更新
-    recordButton.classList.remove('recording')
-    recordText.textContent = '録音開始'
-    
-    // タイマー停止
-    if (state.recordTimerId) {
-      clearInterval(state.recordTimerId)
-      state.recordTimerId = null
-    }
-  }
-}
-
-function startRecordTimer() {
-  state.recordTimerId = setInterval(() => {
-    if (!state.recordStartedAt) return
-    
-    const elapsed = Date.now() - state.recordStartedAt
-    const hours = Math.floor(elapsed / 3600000)
-    const minutes = Math.floor((elapsed % 3600000) / 60000)
-    const seconds = Math.floor((elapsed % 60000) / 1000)
-    
-    if (elements.recordTimer) {
-      elements.recordTimer.textContent = 
-        `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-    }
-  }, 1000)
-}
-
-// ========================================
-// アップロードボタン処理
-// ========================================
-
-const uploadButton = document.getElementById('upload-button')
-
-if (uploadButton) {
-  uploadButton.addEventListener('click', () => {
-    elements.fileInput?.click()
-  })
-}
-
-if (elements.fileInput) {
-  elements.fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    
-    state.selectedFile = file
-    state.selectedSource = 'file'
-    
-    // 処理開始
-    await startProcessingAudio()
-  })
-}
-
-async function startProcessingAudio() {
-  if (!state.selectedFile) {
-    alert('音声ファイルが選択されていません')
-    return
-  }
-  
-  // 既存の処理を呼び出し
-  await startTranscription()
-}
-
-// ========================================
-// 履歴ナビゲーションボタン
-// ========================================
-
-const historyNavButton = document.getElementById('history-nav-button')
-if (historyNavButton) {
-  historyNavButton.addEventListener('click', () => {
+const historyButton = document.getElementById('history-button')
+if (historyButton) {
+  historyButton.addEventListener('click', () => {
     showPage('history')
-    loadTaskHistory()
   })
 }
 
@@ -1714,41 +1601,39 @@ if (historyNavButton) {
 // 履歴画面の処理
 // ========================================
 
-async function loadTaskHistory() {
+async function loadMeetingHistory() {
   const meetingList = document.getElementById('meeting-list')
   if (!meetingList) return
   
   meetingList.innerHTML = '<div class="text-center text-gray-500 py-8">読み込み中...</div>'
   
   try {
-    const response = await fetch('/api/tasks')
-    if (!response.ok) throw new Error('タスクの取得に失敗しました')
+    const response = await fetch('/api/tasks?limit=50')
+    if (!response.ok) throw new Error('データの取得に失敗しました')
     
     const tasks = await response.json()
     
-    if (!tasks || tasks.length === 0) {
-      meetingList.innerHTML = '<div class="text-center text-gray-500 py-8">履歴がありません</div>'
+    if (tasks.length === 0) {
+      meetingList.innerHTML = '<div class="text-center text-gray-500 py-8">議事録がまだありません</div>'
       return
     }
     
     meetingList.innerHTML = tasks.map(task => createMeetingCard(task)).join('')
     
-    // 再生ボタンのイベントリスナー
     document.querySelectorAll('.play-button').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const taskId = e.currentTarget.dataset.taskId
-        await loadTranscript(taskId)
+        await loadTaskTranscript(taskId)
         showPage('home')
       })
     })
     
-    // 削除ボタンのイベントリスナー
     document.querySelectorAll('.delete-button').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const taskId = e.currentTarget.dataset.taskId
         if (confirm('この議事録を削除しますか？')) {
-          await deleteTask(taskId)
-          loadTaskHistory()
+          await deleteTaskById(taskId)
+          loadMeetingHistory()
         }
       })
     })
@@ -1761,7 +1646,7 @@ async function loadTaskHistory() {
 
 function createMeetingCard(task) {
   const date = new Date(task.created_at)
-  const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
   
   const duration = task.duration_ms ? Math.floor(task.duration_ms / 1000) : 0
   const hours = Math.floor(duration / 3600)
@@ -1808,7 +1693,7 @@ function createMeetingCard(task) {
   `
 }
 
-async function loadTranscript(taskId) {
+async function loadTaskTranscript(taskId) {
   try {
     const response = await fetch(`/api/tasks/${taskId}/transcript`)
     if (!response.ok) throw new Error('文字起こしの取得に失敗しました')
@@ -1828,7 +1713,7 @@ async function loadTranscript(taskId) {
   }
 }
 
-async function deleteTask(taskId) {
+async function deleteTaskById(taskId) {
   try {
     const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
     if (!response.ok) throw new Error('削除に失敗しました')
@@ -1841,40 +1726,51 @@ async function deleteTask(taskId) {
 }
 
 // ========================================
-// エラーログ画面の処理
+// 管理画面の処理
 // ========================================
 
-async function loadErrorLogs() {
+async function loadAdminErrors() {
   const errorList = document.getElementById('error-list')
   if (!errorList) return
   
   errorList.innerHTML = '<div class="text-center text-gray-500 py-8">読み込み中...</div>'
   
   try {
-    // エラーログのAPI（現時点では未実装なのでダミーデータ）
-    const errors = [
-      {
-        id: 1,
-        type: 'backend',
-        message: 'Error: Invalid segment job: missing segmentIndex or totalSegments',
-        timestamp: '2026/02/02 08:37',
-        status: 'pending'
-      },
-      {
-        id: 2,
-        type: 'backend',
-        message: 'Error: Invalid segment job: missing segmentIndex or totalSegments',
-        timestamp: '2026/02/02 08:37',
-        status: 'resolved'
-      }
-    ]
+    const response = await fetch('/api/tasks?limit=100')
+    if (!response.ok) throw new Error('データの取得に失敗しました')
     
-    if (errors.length === 0) {
+    const tasks = await response.json()
+    const errorTasks = tasks.filter(task => task.status === 'error')
+    
+    if (errorTasks.length === 0) {
       errorList.innerHTML = '<div class="text-center text-gray-500 py-8">エラーはありません</div>'
+      
+      const totalErrorsEl = document.getElementById('total-errors')
+      const pendingErrorsEl = document.getElementById('pending-errors')
+      const frontendErrorsEl = document.getElementById('frontend-errors')
+      const backendErrorsEl = document.getElementById('backend-errors')
+      const errorCountEl = document.getElementById('error-count')
+      
+      if (totalErrorsEl) totalErrorsEl.textContent = '0'
+      if (pendingErrorsEl) pendingErrorsEl.textContent = '0'
+      if (frontendErrorsEl) frontendErrorsEl.textContent = '0'
+      if (backendErrorsEl) backendErrorsEl.textContent = '0'
+      if (errorCountEl) errorCountEl.textContent = '0'
       return
     }
     
-    errorList.innerHTML = errors.map(error => createErrorCard(error)).join('')
+    errorList.innerHTML = errorTasks.map(task => createTaskErrorCard(task)).join('')
+    
+    const totalErrors = errorTasks.length
+    const totalErrorsEl = document.getElementById('total-errors')
+    const pendingErrorsEl = document.getElementById('pending-errors')
+    const backendErrorsEl = document.getElementById('backend-errors')
+    const errorCountEl = document.getElementById('error-count')
+    
+    if (totalErrorsEl) totalErrorsEl.textContent = totalErrors
+    if (pendingErrorsEl) pendingErrorsEl.textContent = totalErrors
+    if (backendErrorsEl) backendErrorsEl.textContent = totalErrors
+    if (errorCountEl) errorCountEl.textContent = totalErrors
     
   } catch (error) {
     console.error('エラーログの読み込みエラー:', error)
@@ -1882,42 +1778,54 @@ async function loadErrorLogs() {
   }
 }
 
-function createErrorCard(error) {
-  const statusBadge = error.status === 'resolved'
-    ? '<span class="inline-flex items-center gap-1 text-green-600 text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> 解決</span>'
-    : '<span class="inline-flex items-center gap-1 text-gray-600 text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg> 詳細</span>'
+function createTaskErrorCard(task) {
+  const date = new Date(task.created_at)
+  const dateStr = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
   
-  const typeBadge = error.type === 'backend'
-    ? '<span class="inline-block bg-green-100 text-green-700 text-xs px-2 py-1 rounded">backend</span>'
-    : '<span class="inline-block bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded">frontend</span>'
+  const errorMessage = task.error || 'Unknown error'
   
   return `
     <div class="bg-white rounded-lg p-4 shadow">
       <div class="flex items-start gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2 mb-2">
-            ${typeBadge}
+            <span class="inline-block bg-green-100 text-green-700 text-xs px-2 py-1 rounded">backend</span>
             <span class="inline-block bg-red-100 text-red-700 text-xs px-2 py-1 rounded">error</span>
           </div>
-          <p class="text-sm text-gray-900 font-medium mb-1">${error.message}</p>
-          <p class="text-xs text-gray-500">${error.timestamp}</p>
+          <p class="text-sm text-gray-900 font-medium mb-1">${errorMessage}</p>
+          <p class="text-xs text-gray-500">${dateStr}</p>
+          <p class="text-xs text-gray-400 mt-1">Task ID: ${task.id}</p>
         </div>
       </div>
       <div class="mt-3 flex gap-2">
-        ${statusBadge}
-        <button class="text-red-600 text-sm hover:text-red-800">
+        <span class="inline-flex items-center gap-1 text-gray-600 text-sm">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
-          </svg>
-        </button>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg> 詳細
+        </span>
       </div>
     </div>
   `
 }
 
-// 初期化
-document.addEventListener('DOMContentLoaded', () => {
-  // デフォルトでホーム画面を表示
-  showPage('home')
-})
+const refreshHistoryBtn = document.getElementById('refresh-history')
+if (refreshHistoryBtn) {
+  refreshHistoryBtn.addEventListener('click', () => {
+    loadMeetingHistory()
+  })
+}
 
+const refreshErrorsBtn = document.getElementById('refresh-errors')
+if (refreshErrorsBtn) {
+  refreshErrorsBtn.addEventListener('click', () => {
+    loadAdminErrors()
+  })
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', () => {
+    if (pages.home) {
+      showPage('home')
+    }
+  })
+}
