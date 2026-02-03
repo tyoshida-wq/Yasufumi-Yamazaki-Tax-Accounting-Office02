@@ -7,7 +7,7 @@ const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com'
 
 const TIMESTAMP_PATTERN = /^\s*(\d{2}):(\d{2})(?::(\d{2}))?/ // Supports mm:ss or hh:mm:ss
 
-const GEMINI_FLASH_TIMEOUT_MS = 60_000
+const GEMINI_FLASH_TIMEOUT_MS = 120_000  // 2 minutes (increased from 60s to handle larger chunks)
 const GEMINI_PRO_TIMEOUT_MS = 90_000
 const GEMINI_FLASH_MAX_RETRIES = 4
 const GEMINI_PRO_MAX_RETRIES = 3
@@ -1780,10 +1780,8 @@ function detectIfAlreadyCorrected(text: string, chunkStartMs: number): boolean {
     return true  // Will skip correction
   }
   
-  // Check first few timestamps
-  let timestampsNearStart = 0
-  let timestampsChecked = 0
-  const toleranceSeconds = 60  // ±60 seconds tolerance
+  // Extract first few valid timestamps
+  const timestamps: number[] = []
   
   for (const line of lines.slice(0, 10)) {
     const match = line.match(/^(\s*)(\d{1,2}):(\d{2})(?::(\d{2}))?/)
@@ -1796,24 +1794,58 @@ function detectIfAlreadyCorrected(text: string, chunkStartMs: number): boolean {
         seconds = parseInt(p1) * 60 + parseInt(p2)
       }
       
-      timestampsChecked++
+      timestamps.push(seconds)
       
-      // Check if timestamp is near chunk start time (±60 seconds)
-      if (Math.abs(seconds - chunkStartSeconds) <= toleranceSeconds) {
-        timestampsNearStart++
-      }
-      
-      // If chunk starts after 2 minutes but timestamps are < 1 minute, needs correction
-      if (seconds < 60 && chunkStartSeconds > 120) {
-        return false  // Clearly needs correction
+      if (timestamps.length >= 5) break
+    }
+  }
+  
+  // Need at least 2 timestamps to judge
+  if (timestamps.length < 2) {
+    return false  // Not enough data, apply correction to be safe
+  }
+  
+  const firstTimestamp = timestamps[0]
+  
+  // Rule 1: If chunk starts after 2 minutes but first timestamp is < 1 minute, needs correction
+  if (firstTimestamp < 60 && chunkStartSeconds > 120) {
+    return false  // Clearly needs correction
+  }
+  
+  // Rule 2: Check if first timestamp is within reasonable range of chunk start
+  // Allow larger tolerance: max(120 seconds, 10% of chunk start time)
+  const toleranceSeconds = Math.max(120, Math.floor(chunkStartSeconds * 0.1))
+  
+  // If first timestamp is significantly before chunk start, needs correction
+  if (firstTimestamp < chunkStartSeconds - toleranceSeconds) {
+    return false
+  }
+  
+  // Rule 3: If first timestamp is close to chunk start (within tolerance), likely already corrected
+  if (Math.abs(firstTimestamp - chunkStartSeconds) <= toleranceSeconds) {
+    // Additional check: timestamps should be monotonically increasing
+    let isMonotonic = true
+    for (let i = 1; i < timestamps.length; i++) {
+      if (timestamps[i] < timestamps[i - 1]) {
+        isMonotonic = false
+        break
       }
     }
     
-    if (timestampsChecked >= 3) break
+    if (isMonotonic) {
+      return true  // Already corrected
+    }
   }
   
-  // If majority of timestamps are near chunk start, already corrected
-  return timestampsChecked >= 2 && timestampsNearStart >= timestampsChecked / 2
+  // Rule 4: If first timestamp is significantly after chunk start (beyond tolerance), 
+  // but still reasonable (within chunk), assume AI already corrected
+  // This handles cases where AI outputs timestamps like [2092, 2157, 2160, ...]
+  if (firstTimestamp >= chunkStartSeconds && firstTimestamp <= chunkStartSeconds + 300) {
+    return true  // Likely already corrected
+  }
+  
+  // Default: apply correction
+  return false
 }
 
 function correctTimestamps(text: string, chunkStartMs: number): string {
