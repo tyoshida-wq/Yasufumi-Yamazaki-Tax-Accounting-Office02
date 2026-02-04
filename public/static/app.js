@@ -52,7 +52,9 @@ const elements = {
   recordingConfirmCheckbox: document.getElementById('recording-confirm-checkbox'),
   recordingConfirmCancel: document.getElementById('recording-confirm-cancel'),
   recordingConfirmStart: document.getElementById('recording-confirm-start'),
-  recordingWarningBanner: document.getElementById('recording-warning-banner')
+  recordingWarningBanner: document.getElementById('recording-warning-banner'),
+  audioLevelIndicator: document.getElementById('audio-level-indicator'),
+  audioLevelBar: document.getElementById('audio-level-bar')
 }
 
 const state = {
@@ -372,6 +374,7 @@ async function startRecording() {
       state.recordStartedAt = Date.now()
       startTimer()
       startWaveformDrawing()
+      startAudioLevelIndicator()
       logStatus('録音を開始しました。最大3時間まで記録できます。')
       elements.recordStatus.textContent = '録音中...'
       elements.recordStatus.classList.add('text-emerald-600')
@@ -384,6 +387,11 @@ async function startRecording() {
       // Show timer container
       const timerContainer = document.getElementById('record-timer-container')
       if (timerContainer) timerContainer.classList.remove('hidden')
+      
+      // Show audio level indicator
+      if (elements.audioLevelIndicator) {
+        elements.audioLevelIndicator.classList.remove('hidden')
+      }
       
       // Show warning banner
       if (elements.recordingWarningBanner) {
@@ -401,6 +409,11 @@ async function startRecording() {
       // Hide warning banner
       if (elements.recordingWarningBanner) {
         elements.recordingWarningBanner.classList.add('hidden')
+      }
+      
+      // Hide audio level indicator
+      if (elements.audioLevelIndicator) {
+        elements.audioLevelIndicator.classList.add('hidden')
       }
       
       const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder?.mimeType || 'audio/webm' })
@@ -1497,6 +1510,74 @@ function stopWaveformDrawing() {
     cancelAnimationFrame(state.animationId)
     state.animationId = null
   }
+  stopAudioLevelIndicator()
+}
+
+// 音声レベルインジケーター
+function startAudioLevelIndicator() {
+  if (!state.analyser) return
+  
+  const audioBars = document.querySelectorAll('.audio-bar')
+  if (audioBars.length === 0) return
+  
+  const bufferLength = state.analyser.frequencyBinCount
+  const dataArray = new Uint8Array(bufferLength)
+  
+  function updateIndicator() {
+    if (!state.analyser) return
+    
+    state.indicatorAnimationId = requestAnimationFrame(updateIndicator)
+    
+    // 音声データを取得
+    state.analyser.getByteFrequencyData(dataArray)
+    
+    // 平均音量を計算
+    let sum = 0
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i]
+    }
+    const average = sum / bufferLength
+    
+    // 音量を0-1の範囲に正規化
+    const normalizedLevel = average / 255
+    
+    // 各バーの高さを音量レベルに応じて調整
+    audioBars.forEach((bar, index) => {
+      const barIndex = index < audioBars.length / 2 ? index : audioBars.length - 1 - index
+      const barThreshold = barIndex / (audioBars.length / 2)
+      
+      if (normalizedLevel > barThreshold) {
+        // 音量に応じて色を変更（緑→黄→赤）
+        if (normalizedLevel < 0.5) {
+          bar.style.backgroundColor = '#10b981' // 緑
+        } else if (normalizedLevel < 0.75) {
+          bar.style.backgroundColor = '#f59e0b' // 黄
+        } else {
+          bar.style.backgroundColor = '#ef4444' // 赤
+        }
+        bar.style.opacity = '1'
+      } else {
+        bar.style.backgroundColor = '#d1d5db' // グレー
+        bar.style.opacity = '0.3'
+      }
+    })
+  }
+  
+  updateIndicator()
+}
+
+function stopAudioLevelIndicator() {
+  if (state.indicatorAnimationId) {
+    cancelAnimationFrame(state.indicatorAnimationId)
+    state.indicatorAnimationId = null
+  }
+  
+  // バーをリセット
+  const audioBars = document.querySelectorAll('.audio-bar')
+  audioBars.forEach(bar => {
+    bar.style.backgroundColor = '#d1d5db'
+    bar.style.opacity = '0.3'
+  })
 }
 
 function clearWaveformCanvas() {
