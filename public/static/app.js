@@ -419,13 +419,13 @@ async function startRecording() {
       logStatus(`録音が完了しました（${formatBytes(file.size)}）。処理を開始します...`)
       resetRecordingControls()
       
-      // 自動で処理を開始（0.5秒後にボタンをクリック）
-      setTimeout(() => {
-        if (elements.startProcessing && !elements.startProcessing.disabled) {
+      // 自動で処理を開始（0.5秒後に直接実行）
+      setTimeout(async () => {
+        if (state.selectedFile && !state.isProcessing) {
           console.log('[Auto] 自動で処理を開始します')
-          elements.startProcessing.click()
+          await processAudioFile(state.selectedFile)
         } else {
-          console.warn('[Auto] 処理開始ボタンが無効です')
+          console.warn('[Auto] ファイルが選択されていないか、既に処理中です')
         }
       }, 500)
     }
