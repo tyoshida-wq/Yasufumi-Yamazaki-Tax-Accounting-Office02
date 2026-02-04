@@ -416,8 +416,18 @@ async function startRecording() {
       showAudioPlayer(blob)
       
       setSelectedFile(file, 'ブラウザ録音')
-      logStatus(`録音が完了しました（${formatBytes(file.size)}）。文字起こしを開始できます。`)
+      logStatus(`録音が完了しました（${formatBytes(file.size)}）。処理を開始します...`)
       resetRecordingControls()
+      
+      // 自動で処理を開始（0.5秒後にボタンをクリック）
+      setTimeout(() => {
+        if (elements.startProcessing && !elements.startProcessing.disabled) {
+          console.log('[Auto] 自動で処理を開始します')
+          elements.startProcessing.click()
+        } else {
+          console.warn('[Auto] 処理開始ボタンが無効です')
+        }
+      }, 500)
     }
 
     state.mediaRecorder.start()
