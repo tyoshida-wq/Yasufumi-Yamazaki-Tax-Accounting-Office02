@@ -1169,11 +1169,32 @@ app.post('/api/tasks/:taskId/reprocess', async (c) => {
 
 app.get('/api/tasks', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
+  const from = c.req.query('from') || ''
+  const to = c.req.query('to') || ''
   
   try {
-    const results = await c.env.DB.prepare(
-      'SELECT id, filename, total_chunks, processed_chunks, duration_ms, status, error, created_at, updated_at FROM tasks ORDER BY created_at DESC LIMIT ?'
-    ).bind(limit).all<{
+    let sql = 'SELECT id, filename, total_chunks, processed_chunks, duration_ms, status, error, created_at, updated_at FROM tasks'
+    const bindings: any[] = []
+    
+    // 日付フィルタの追加
+    const conditions: string[] = []
+    if (from) {
+      conditions.push('DATE(created_at) >= DATE(?)')
+      bindings.push(from)
+    }
+    if (to) {
+      conditions.push('DATE(created_at) <= DATE(?)')
+      bindings.push(to)
+    }
+    
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ')
+    }
+    
+    sql += ' ORDER BY created_at DESC LIMIT ?'
+    bindings.push(limit)
+    
+    const results = await c.env.DB.prepare(sql).bind(...bindings).all<{
       id: string
       filename: string | null
       total_chunks: number

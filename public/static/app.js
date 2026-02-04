@@ -244,6 +244,63 @@ if (elements.recordingConfirmStart) {
   elements.recordingConfirmStart.addEventListener('click', handleRecordingConfirmStart)
 }
 
+// タブ切替のイベントリスナー
+const tabRealtime = document.getElementById('tab-realtime')
+const tabHistory = document.getElementById('tab-history')
+const realtimeMode = document.getElementById('realtime-mode')
+const historyMode = document.getElementById('history-mode')
+
+if (tabRealtime && tabHistory && realtimeMode && historyMode) {
+  tabRealtime.addEventListener('click', () => {
+    // タブの見た目を切り替え
+    tabRealtime.classList.remove('bg-gray-200', 'text-gray-700')
+    tabRealtime.classList.add('bg-blue-600', 'text-white')
+    tabHistory.classList.remove('bg-blue-600', 'text-white')
+    tabHistory.classList.add('bg-gray-200', 'text-gray-700')
+    
+    // モードを切り替え
+    realtimeMode.classList.remove('hidden')
+    historyMode.classList.add('hidden')
+  })
+  
+  tabHistory.addEventListener('click', () => {
+    // タブの見た目を切り替え
+    tabHistory.classList.remove('bg-gray-200', 'text-gray-700')
+    tabHistory.classList.add('bg-blue-600', 'text-white')
+    tabRealtime.classList.remove('bg-blue-600', 'text-white')
+    tabRealtime.classList.add('bg-gray-200', 'text-gray-700')
+    
+    // モードを切り替え
+    historyMode.classList.remove('hidden')
+    realtimeMode.classList.add('hidden')
+    
+    // タスク一覧を読み込み
+    loadTaskList()
+  })
+}
+
+// 日付フィルタのイベントリスナー
+const applyDateFilter = document.getElementById('apply-date-filter')
+const clearDateFilter = document.getElementById('clear-date-filter')
+
+if (applyDateFilter) {
+  applyDateFilter.addEventListener('click', loadTaskList)
+}
+
+if (clearDateFilter) {
+  clearDateFilter.addEventListener('click', () => {
+    document.getElementById('filter-date-from').value = ''
+    document.getElementById('filter-date-to').value = ''
+    loadTaskList()
+  })
+}
+
+// ログコピーのイベントリスナー
+const copyLogsBtn = document.getElementById('copy-logs')
+if (copyLogsBtn) {
+  copyLogsBtn.addEventListener('click', copyLogs)
+}
+
 setupDragAndDrop()
 loadTaskHistory()
 
@@ -2560,3 +2617,158 @@ const refreshStatsBtn = document.getElementById('refresh-stats')
 if (refreshStatsBtn) {
   refreshStatsBtn.addEventListener('click', loadUsageStats)
 }
+
+// ========================================
+// ログ履歴機能
+// ========================================
+
+// タスク一覧を読み込み
+async function loadTaskList() {
+  const tbody = document.getElementById('task-list-body')
+  if (!tbody) return
+  
+  tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">読み込み中...</td></tr>'
+  
+  try {
+    // 日付フィルタの取得
+    const dateFrom = document.getElementById('filter-date-from')?.value || ''
+    const dateTo = document.getElementById('filter-date-to')?.value || ''
+    
+    let url = '/api/tasks?limit=50'
+    if (dateFrom) url += `&from=${dateFrom}`
+    if (dateTo) url += `&to=${dateTo}`
+    
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('Failed to fetch tasks')
+    
+    const data = await response.json()
+    const tasks = data.tasks || []
+    
+    if (tasks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">タスクが見つかりません</td></tr>'
+      return
+    }
+    
+    tbody.innerHTML = tasks.map(task => {
+      const date = new Date(task.created_at).toLocaleString('ja-JP')
+      const statusBadge = getStatusBadge(task.status)
+      
+      return `
+        <tr class="border-b hover:bg-gray-50">
+          <td class="px-4 py-3 text-xs text-gray-600">${date}</td>
+          <td class="px-4 py-3 text-sm">${task.filename || 'Unknown'}</td>
+          <td class="px-4 py-3">${statusBadge}</td>
+          <td class="px-4 py-3">
+            <button onclick="loadTaskLogs('${task.id}')" class="text-blue-600 hover:text-blue-800 text-sm font-semibold">
+              ログを見る
+            </button>
+          </td>
+        </tr>
+      `
+    }).join('')
+  } catch (error) {
+    console.error('タスク一覧の読み込みエラー:', error)
+    tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-red-500">読み込みに失敗しました</td></tr>'
+  }
+}
+
+// ステータスバッジを生成
+function getStatusBadge(status) {
+  const badges = {
+    'initialized': '<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">初期化</span>',
+    'transcribing': '<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">文字起こし中</span>',
+    'transcribed': '<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">文字起こし完了</span>',
+    'summarizing': '<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">要約中</span>',
+    'completed': '<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">完了</span>',
+    'error': '<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">エラー</span>'
+  }
+  return badges[status] || '<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">不明</span>'
+}
+
+// タスクのログを読み込み
+async function loadTaskLogs(taskId) {
+  const logContent = document.getElementById('log-content')
+  const copyBtn = document.getElementById('copy-logs')
+  
+  if (!logContent) return
+  
+  logContent.innerHTML = '<p class="text-gray-500 text-sm">読み込み中...</p>'
+  if (copyBtn) copyBtn.classList.remove('hidden')
+  
+  try {
+    const response = await fetch(`/api/tasks/${taskId}/logs`)
+    if (!response.ok) throw new Error('Failed to fetch logs')
+    
+    const data = await response.json()
+    const logs = data.logs || []
+    
+    if (logs.length === 0) {
+      logContent.innerHTML = '<p class="text-gray-500 text-sm">ログがありません</p>'
+      if (copyBtn) copyBtn.classList.add('hidden')
+      return
+    }
+    
+    // ログを整形して表示
+    logContent.innerHTML = `
+      <div class="bg-gray-900 rounded-lg p-4">
+        <div class="text-xs font-mono text-gray-300 space-y-1">
+          ${logs.map(log => {
+            const date = new Date(log.timestamp).toLocaleString('ja-JP')
+            const levelColor = {
+              'info': 'text-green-400',
+              'warn': 'text-yellow-400',
+              'error': 'text-red-400'
+            }[log.level] || 'text-gray-400'
+            
+            return `
+              <div class="border-b border-gray-700 pb-1 mb-1">
+                <span class="text-gray-500">[${date}]</span>
+                <span class="${levelColor}">[${log.level.toUpperCase()}]</span>
+                <span class="text-white">${log.message}</span>
+              </div>
+            `
+          }).join('')}
+        </div>
+      </div>
+    `
+    
+    // ログをグローバル変数に保存（コピー用）
+    window.currentTaskLogs = logs
+  } catch (error) {
+    console.error('ログ読み込みエラー:', error)
+    logContent.innerHTML = '<p class="text-red-500 text-sm">ログの読み込みに失敗しました</p>'
+    if (copyBtn) copyBtn.classList.add('hidden')
+  }
+}
+
+// ログをコピー
+async function copyLogs() {
+  if (!window.currentTaskLogs || window.currentTaskLogs.length === 0) {
+    alert('コピーするログがありません')
+    return
+  }
+  
+  try {
+    const logsText = window.currentTaskLogs.map(log => {
+      const date = new Date(log.timestamp).toLocaleString('ja-JP')
+      return `[${date}] [${log.level.toUpperCase()}] ${log.message}`
+    }).join('\n')
+    
+    await navigator.clipboard.writeText(logsText)
+    
+    const copyBtn = document.getElementById('copy-logs')
+    if (copyBtn) {
+      const originalText = copyBtn.innerHTML
+      copyBtn.innerHTML = '<svg class="w-4 h-4 inline-block mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> コピー完了'
+      setTimeout(() => {
+        copyBtn.innerHTML = originalText
+      }, 2000)
+    }
+  } catch (error) {
+    console.error('コピーエラー:', error)
+    alert('コピーに失敗しました')
+  }
+}
+
+// loadTaskLogsをグローバルスコープに公開
+window.loadTaskLogs = loadTaskLogs
