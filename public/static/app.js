@@ -2415,3 +2415,145 @@ function convertMarkdownToHTML(markdown) {
   
   return html
 }
+
+// Stats management
+let usageChart = null
+
+async function loadUsageStats() {
+  try {
+    const response = await fetch('/api/stats/summary')
+    if (!response.ok) {
+      console.error('Failed to load stats:', response.statusText)
+      return
+    }
+    
+    const data = await response.json()
+    
+    // Update summary cards
+    document.getElementById('stat-total-tasks').textContent = data.summary.total_tasks.toLocaleString()
+    document.getElementById('stat-total-hours').textContent = data.summary.total_hours.toLocaleString() + ' hrs'
+    document.getElementById('stat-total-chunks').textContent = data.summary.total_chunks.toLocaleString()
+    document.getElementById('stat-total-minutes').textContent = data.summary.total_minutes.toLocaleString()
+    
+    // Update API usage
+    document.getElementById('stat-api-calls').textContent = data.api_usage.total_calls.toLocaleString() + '回'
+    document.getElementById('stat-transcription-calls').textContent = data.api_usage.transcription_calls.toLocaleString() + '回'
+    document.getElementById('stat-minutes-calls').textContent = data.api_usage.minutes_calls.toLocaleString() + '回'
+    document.getElementById('stat-estimated-cost').textContent = data.api_usage.estimated_cost_usd.toFixed(2)
+    
+    // Update detailed stats
+    document.getElementById('stat-avg-duration').textContent = data.averages.audio_duration_minutes.toFixed(1) + ' 分'
+    document.getElementById('stat-avg-chunks').textContent = data.averages.chunks_per_task.toFixed(1)
+    document.getElementById('stat-error-rate').textContent = data.api_usage.error_rate_percent.toFixed(2) + '%'
+    document.getElementById('stat-r2-storage').textContent = data.storage.r2_gb.toFixed(2) + ' GB'
+    document.getElementById('stat-total-chars').textContent = data.summary.total_chunks.toLocaleString()
+    document.getElementById('stat-last-30-days').textContent = data.last_30_days.tasks_count.toLocaleString() + ' 件'
+    
+    // Load and render chart
+    await loadDailyStatsChart()
+  } catch (error) {
+    console.error('Error loading usage stats:', error)
+  }
+}
+
+async function loadDailyStatsChart() {
+  try {
+    const response = await fetch('/api/stats/daily?days=30')
+    if (!response.ok) {
+      console.error('Failed to load daily stats:', response.statusText)
+      return
+    }
+    
+    const data = await response.json()
+    const stats = data.stats.reverse()  // Oldest to newest
+    
+    // Prepare chart data
+    const labels = stats.map(s => {
+      const date = new Date(s.date)
+      return (date.getMonth() + 1) + '/' + date.getDate()
+    })
+    const taskCounts = stats.map(s => s.tasks_count || 0)
+    const chunkCounts = stats.map(s => s.chunks_processed || 0)
+    
+    // Destroy existing chart if any
+    if (usageChart) {
+      usageChart.destroy()
+    }
+    
+    // Create new chart
+    const ctx = document.getElementById('usage-chart')
+    if (!ctx) return
+    
+    usageChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'タスク数',
+            data: taskCounts,
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            tension: 0.3,
+            fill: true
+          },
+          {
+            label: 'チャンク処理数',
+            data: chunkCounts,
+            borderColor: 'rgb(168, 85, 247)',
+            backgroundColor: 'rgba(168, 85, 247, 0.1)',
+            tension: 0.3,
+            fill: true
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top'
+          },
+          tooltip: {
+            mode: 'index',
+            intersect: false
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
+            }
+          }
+        },
+        interaction: {
+          mode: 'nearest',
+          axis: 'x',
+          intersect: false
+        }
+      }
+    })
+  } catch (error) {
+    console.error('Error loading daily stats chart:', error)
+  }
+}
+
+// Refresh stats button
+const refreshStatsBtn = document.getElementById('refresh-stats')
+if (refreshStatsBtn) {
+  refreshStatsBtn.addEventListener('click', loadUsageStats)
+}
+
+// Load stats when admin page is shown
+const originalShowPage = window.showPage
+window.showPage = function(pageId) {
+  if (typeof originalShowPage === 'function') {
+    originalShowPage(pageId)
+  }
+  
+  if (pageId === 'admin') {
+    loadUsageStats()
+  }
+}

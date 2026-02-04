@@ -811,6 +811,182 @@ app.get('/api/tasks/:taskId/minutes', async (c) => {
 
 app.get('/api/healthz', (c) => c.json({ ok: true }))
 
+// Statistics API endpoints
+app.get('/api/stats/usage', async (c) => {
+  try {
+    const stats = await c.env.DB.prepare(
+      `SELECT * FROM usage_stats WHERE id = 1`
+    ).first()
+    
+    if (!stats) {
+      return c.json({ error: 'Stats not found' }, 404)
+    }
+    
+    // Calculate derived values
+    const totalHours = (stats.total_audio_duration_ms as number) / (1000 * 60 * 60)
+    const avgDurationMs = (stats.total_tasks as number) > 0 
+      ? (stats.total_audio_duration_ms as number) / (stats.total_tasks as number)
+      : 0
+    const avgChunksPerTask = (stats.total_tasks as number) > 0
+      ? (stats.total_chunks_processed as number) / (stats.total_tasks as number)
+      : 0
+    const errorRate = (stats.gemini_transcription_calls as number) > 0
+      ? (stats.total_api_errors as number) / (stats.gemini_transcription_calls as number)
+      : 0
+    
+    // Gemini 2.5 Flash pricing (from image)
+    // Audio input: $1.00 / 1M tokens
+    // Text/image/video input: $0.30 / 1M tokens
+    // Output: $2.50 / 1M tokens
+    
+    // Rough estimation: 
+    // - Audio transcription: assume 1000 tokens per minute of audio for input
+    // - Output: assume 150 tokens per minute for transcription
+    // - Minutes generation: assume 2000 tokens input + 1000 tokens output
+    
+    const totalMinutes = totalHours * 60
+    const transcriptionInputTokens = totalMinutes * 1000  // Audio tokens
+    const transcriptionOutputTokens = totalMinutes * 150
+    const minutesInputTokens = (stats.total_minutes_generated as number) * 2000
+    const minutesOutputTokens = (stats.total_minutes_generated as number) * 1000
+    
+    const transcriptionCost = (
+      (transcriptionInputTokens / 1000000) * 1.00 +  // Audio input
+      (transcriptionOutputTokens / 1000000) * 2.50   // Output
+    )
+    const minutesCost = (
+      (minutesInputTokens / 1000000) * 0.30 +  // Text input
+      (minutesOutputTokens / 1000000) * 2.50   // Output
+    )
+    const estimatedCost = transcriptionCost + minutesCost
+    
+    return c.json({
+      total_tasks: stats.total_tasks,
+      total_audio_duration_ms: stats.total_audio_duration_ms,
+      total_audio_duration_hours: Math.round(totalHours * 100) / 100,
+      total_chunks_processed: stats.total_chunks_processed,
+      total_transcripts_generated: stats.total_transcripts_generated,
+      total_minutes_generated: stats.total_minutes_generated,
+      total_transcript_characters: stats.total_transcript_characters,
+      gemini_transcription_calls: stats.gemini_transcription_calls,
+      gemini_minutes_calls: stats.gemini_minutes_calls,
+      total_api_errors: stats.total_api_errors,
+      error_rate: Math.round(errorRate * 10000) / 100,  // percentage
+      average_audio_duration_ms: Math.round(avgDurationMs),
+      average_audio_duration_minutes: Math.round((avgDurationMs / (1000 * 60)) * 100) / 100,
+      average_chunks_per_task: Math.round(avgChunksPerTask * 10) / 10,
+      total_r2_bytes: stats.total_r2_bytes,
+      total_r2_gb: Math.round((stats.total_r2_bytes as number) / (1024 * 1024 * 1024) * 100) / 100,
+      estimated_api_cost_usd: Math.round(estimatedCost * 100) / 100,
+      updated_at: stats.updated_at
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ error: errorMessage }, 500)
+  }
+})
+
+app.get('/api/stats/daily', async (c) => {
+  try {
+    const days = parseInt(c.req.query('days') || '30', 10)
+    const limit = Math.min(Math.max(days, 1), 365)  // 1-365 days
+    
+    const stats = await c.env.DB.prepare(
+      `SELECT * FROM daily_usage_stats 
+       ORDER BY date DESC 
+       LIMIT ?`
+    ).bind(limit).all()
+    
+    return c.json({
+      stats: stats.results || []
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ error: errorMessage }, 500)
+  }
+})
+
+app.get('/api/stats/summary', async (c) => {
+  try {
+    const stats = await c.env.DB.prepare(
+      `SELECT * FROM usage_stats WHERE id = 1`
+    ).first()
+    
+    if (!stats) {
+      return c.json({ error: 'Stats not found' }, 404)
+    }
+    
+    // Get last 30 days stats
+    const last30Days = await c.env.DB.prepare(
+      `SELECT 
+        COUNT(*) as tasks_count,
+        SUM(audio_duration_ms) as total_duration_ms
+       FROM daily_usage_stats 
+       WHERE date >= DATE('now', '-30 days')`
+    ).first()
+    
+    const totalHours = (stats.total_audio_duration_ms as number) / (1000 * 60 * 60)
+    const avgDurationMinutes = (stats.total_tasks as number) > 0
+      ? ((stats.total_audio_duration_ms as number) / (1000 * 60)) / (stats.total_tasks as number)
+      : 0
+    const avgChunksPerTask = (stats.total_tasks as number) > 0
+      ? (stats.total_chunks_processed as number) / (stats.total_tasks as number)
+      : 0
+    const errorRate = (stats.gemini_transcription_calls as number) > 0
+      ? ((stats.total_api_errors as number) / (stats.gemini_transcription_calls as number)) * 100
+      : 0
+    
+    // Cost estimation
+    const totalMinutes = totalHours * 60
+    const transcriptionInputTokens = totalMinutes * 1000
+    const transcriptionOutputTokens = totalMinutes * 150
+    const minutesInputTokens = (stats.total_minutes_generated as number) * 2000
+    const minutesOutputTokens = (stats.total_minutes_generated as number) * 1000
+    
+    const estimatedCost = (
+      (transcriptionInputTokens / 1000000) * 1.00 +
+      (transcriptionOutputTokens / 1000000) * 2.50 +
+      (minutesInputTokens / 1000000) * 0.30 +
+      (minutesOutputTokens / 1000000) * 2.50
+    )
+    
+    const last30DaysHours = last30Days 
+      ? ((last30Days.total_duration_ms as number || 0) / (1000 * 60 * 60))
+      : 0
+    
+    return c.json({
+      summary: {
+        total_tasks: stats.total_tasks,
+        total_hours: Math.round(totalHours * 100) / 100,
+        total_chunks: stats.total_chunks_processed,
+        total_minutes: stats.total_minutes_generated
+      },
+      api_usage: {
+        total_calls: (stats.gemini_transcription_calls as number) + (stats.gemini_minutes_calls as number),
+        transcription_calls: stats.gemini_transcription_calls,
+        minutes_calls: stats.gemini_minutes_calls,
+        error_rate_percent: Math.round(errorRate * 100) / 100,
+        estimated_cost_usd: Math.round(estimatedCost * 100) / 100
+      },
+      averages: {
+        audio_duration_minutes: Math.round(avgDurationMinutes * 100) / 100,
+        chunks_per_task: Math.round(avgChunksPerTask * 10) / 10
+      },
+      storage: {
+        r2_gb: Math.round((stats.total_r2_bytes as number) / (1024 * 1024 * 1024) * 100) / 100,
+        d1_records: (stats.total_tasks as number) * 10  // Rough estimation
+      },
+      last_30_days: {
+        tasks_count: last30Days?.tasks_count || 0,
+        total_hours: Math.round(last30DaysHours * 100) / 100
+      }
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return c.json({ error: errorMessage }, 500)
+  }
+})
+
 // Admin endpoint: Fix chunk states inconsistency
 app.post('/api/tasks/:taskId/fix-chunk-states', async (c) => {
   const taskId = c.req.param('taskId')

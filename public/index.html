@@ -135,6 +135,7 @@
         color: #2563EB;
       }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   </head>
   <body class="min-h-screen bg-gray-50">
     <!-- ホーム画面 -->
@@ -391,12 +392,12 @@
     <div id="page-admin" class="page">
       <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <svg class="w-6 h-6 text-orange-500" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          <svg class="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
           </svg>
-          <h1 class="text-xl font-bold text-gray-900">エラーログ</h1>
+          <h1 class="text-xl font-bold text-gray-900">アプリ使用統計</h1>
         </div>
-        <button id="refresh-errors" class="text-blue-500">
+        <button id="refresh-stats" class="text-blue-500 hover:text-blue-700">
           <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
             <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
           </svg>
@@ -404,29 +405,112 @@
       </header>
       
       <main class="px-6 py-4">
-        <!-- エラー統計 -->
-        <div class="grid grid-cols-2 gap-4 mb-6">
-          <div class="bg-white rounded-lg p-4 text-center shadow">
-            <div class="text-3xl font-bold text-gray-900" id="total-errors">117</div>
-            <div class="text-sm text-gray-500">総エラー数</div>
+        <!-- 基本統計サマリー -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+          <div class="bg-white rounded-lg p-6 text-center shadow">
+            <div class="text-3xl font-bold text-blue-600" id="stat-total-tasks">-</div>
+            <div class="text-sm text-gray-600 mt-1">総タスク数</div>
+            <div class="text-xs text-gray-400 mt-1">累積</div>
           </div>
-          <div class="bg-white rounded-lg p-4 text-center shadow">
-            <div class="text-3xl font-bold text-orange-500" id="pending-errors">70</div>
-            <div class="text-sm text-gray-500">未解決</div>
+          <div class="bg-white rounded-lg p-6 text-center shadow">
+            <div class="text-3xl font-bold text-green-600" id="stat-total-hours">-</div>
+            <div class="text-sm text-gray-600 mt-1">総音声長</div>
+            <div class="text-xs text-gray-400 mt-1">時間</div>
           </div>
-          <div class="bg-white rounded-lg p-4 text-center shadow">
-            <div class="text-3xl font-bold text-blue-500" id="frontend-errors">16</div>
-            <div class="text-sm text-gray-500">フロントエンド</div>
+          <div class="bg-white rounded-lg p-6 text-center shadow">
+            <div class="text-3xl font-bold text-purple-600" id="stat-total-chunks">-</div>
+            <div class="text-sm text-gray-600 mt-1">総チャンク数</div>
+            <div class="text-xs text-gray-400 mt-1">処理済み</div>
           </div>
-          <div class="bg-white rounded-lg p-4 text-center shadow">
-            <div class="text-3xl font-bold text-green-500" id="backend-errors">101</div>
-            <div class="text-sm text-gray-500">バックエンド</div>
+          <div class="bg-white rounded-lg p-6 text-center shadow">
+            <div class="text-3xl font-bold text-indigo-600" id="stat-total-minutes">-</div>
+            <div class="text-sm text-gray-600 mt-1">総議事録数</div>
+            <div class="text-xs text-gray-400 mt-1">生成済み</div>
           </div>
         </div>
         
-        <!-- エラーリスト -->
-        <div id="error-list" class="space-y-3">
-          <!-- エラーカードはJavaScriptで動的に生成 -->
+        <!-- API使用状況 -->
+        <div class="bg-white rounded-lg p-6 shadow mb-6">
+          <h3 class="text-lg font-semibold mb-4 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-blue-500" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+            </svg>
+            API使用状況
+          </h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm text-gray-600">Gemini API呼び出し</div>
+              <div class="text-2xl font-bold" id="stat-api-calls">-</div>
+              <div class="text-xs text-gray-500 mt-1">
+                文字起こし: <span id="stat-transcription-calls">-</span> / 
+                議事録: <span id="stat-minutes-calls">-</span>
+              </div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-600">推定APIコスト</div>
+              <div class="text-2xl font-bold text-red-600">$<span id="stat-estimated-cost">-</span></div>
+              <div class="text-xs text-gray-500 mt-1">Gemini 2.5 Flash 推定</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 時系列グラフ -->
+        <div class="bg-white rounded-lg p-6 shadow mb-6">
+          <h3 class="text-lg font-semibold mb-4 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-green-500" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
+            </svg>
+            使用トレンド（過去30日）
+          </h3>
+          <canvas id="usage-chart" width="400" height="150"></canvas>
+        </div>
+        
+        <!-- 詳細統計 -->
+        <div class="bg-white rounded-lg p-6 shadow">
+          <h3 class="text-lg font-semibold mb-4 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-purple-500" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+            </svg>
+            詳細統計
+          </h3>
+          <table class="w-full text-sm">
+            <tbody>
+              <tr class="border-b">
+                <td class="py-2 text-gray-600">平均音声長</td>
+                <td class="text-right font-semibold" id="stat-avg-duration">-</td>
+              </tr>
+              <tr class="border-b">
+                <td class="py-2 text-gray-600">平均チャンク数/タスク</td>
+                <td class="text-right font-semibold" id="stat-avg-chunks">-</td>
+              </tr>
+              <tr class="border-b">
+                <td class="py-2 text-gray-600">エラー率</td>
+                <td class="text-right font-semibold" id="stat-error-rate">-</td>
+              </tr>
+              <tr class="border-b">
+                <td class="py-2 text-gray-600">R2ストレージ使用量</td>
+                <td class="text-right font-semibold" id="stat-r2-storage">-</td>
+              </tr>
+              <tr class="border-b">
+                <td class="py-2 text-gray-600">総文字起こし文字数</td>
+                <td class="text-right font-semibold" id="stat-total-chars">-</td>
+              </tr>
+              <tr>
+                <td class="py-2 text-gray-600">過去30日のタスク数</td>
+                <td class="text-right font-semibold" id="stat-last-30-days">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <!-- コスト計算の説明 -->
+        <div class="mt-6 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+          <p class="text-sm text-blue-800">
+            <strong>💡 コスト推定について</strong><br>
+            Gemini 2.5 Flash の料金: 音声入力 $1.00/100万トークン、テキスト入力 $0.30/100万トークン、出力 $2.50/100万トークン<br>
+            推定方法: 音声1分あたり約1000トークン（入力）+ 150トークン（出力）、議事録生成は1件あたり約2000トークン（入力）+ 1000トークン（出力）で計算。<br>
+            <span class="text-xs">※あくまで推定値です。実際のコストはCloudflareダッシュボードでご確認ください。</span>
+          </p>
         </div>
       </main>
     </div>
@@ -683,6 +767,6 @@
     <audio id="audio-player" class="hidden"></audio>
     <canvas id="waveform-canvas" class="hidden"></canvas>
     
-    <script type="module" src="/static/app.js?v=20260204052000"></script>
+    <script type="module" src="/static/app.js?v=20260204062000"></script>
   </body>
 </html>
