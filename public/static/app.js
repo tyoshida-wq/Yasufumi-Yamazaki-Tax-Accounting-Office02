@@ -47,7 +47,12 @@ const elements = {
   triggerReprocess: document.getElementById('trigger-reprocess'),
   retryMerge: document.getElementById('retry-merge'),
   refreshHistory: document.getElementById('refresh-history'),
-  taskHistoryContainer: document.getElementById('task-history-container')
+  taskHistoryContainer: document.getElementById('task-history-container'),
+  recordingConfirmModal: document.getElementById('recording-confirm-modal'),
+  recordingConfirmCheckbox: document.getElementById('recording-confirm-checkbox'),
+  recordingConfirmCancel: document.getElementById('recording-confirm-cancel'),
+  recordingConfirmStart: document.getElementById('recording-confirm-start'),
+  recordingWarningBanner: document.getElementById('recording-warning-banner')
 }
 
 const state = {
@@ -221,7 +226,7 @@ if (elements.retryMerge) {
 }
 
 if (elements.recordStart) {
-  elements.recordStart.addEventListener('click', startRecording)
+  elements.recordStart.addEventListener('click', showRecordingConfirmModal)
 }
 if (elements.recordStop) {
   elements.recordStop.addEventListener('click', stopRecording)
@@ -232,9 +237,59 @@ if (elements.clearAudio) {
 if (elements.refreshHistory) {
   elements.refreshHistory.addEventListener('click', loadTaskHistory)
 }
+if (elements.recordingConfirmCancel) {
+  elements.recordingConfirmCancel.addEventListener('click', hideRecordingConfirmModal)
+}
+if (elements.recordingConfirmStart) {
+  elements.recordingConfirmStart.addEventListener('click', handleRecordingConfirmStart)
+}
 
 setupDragAndDrop()
 loadTaskHistory()
+
+// ページ離脱時の警告（録音中のみ）
+window.addEventListener('beforeunload', (e) => {
+  if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
+    e.preventDefault()
+    e.returnValue = '' // Chrome requires returnValue to be set
+    return '録音中です。ページを離れると録音が停止します。'
+  }
+})
+
+// 録音開始前の確認モーダル（初回のみ）
+function showRecordingConfirmModal() {
+  // ローカルストレージで確認済みかチェック
+  const hasConfirmed = localStorage.getItem('recording-confirm-accepted')
+  if (hasConfirmed === 'true') {
+    // 確認済みの場合は直接録音開始
+    startRecording()
+    return
+  }
+  
+  // モーダルを表示
+  if (elements.recordingConfirmModal) {
+    elements.recordingConfirmModal.classList.remove('hidden')
+  }
+}
+
+function hideRecordingConfirmModal() {
+  if (elements.recordingConfirmModal) {
+    elements.recordingConfirmModal.classList.add('hidden')
+  }
+}
+
+function handleRecordingConfirmStart() {
+  // チェックボックスの状態を確認
+  if (elements.recordingConfirmCheckbox && elements.recordingConfirmCheckbox.checked) {
+    localStorage.setItem('recording-confirm-accepted', 'true')
+  }
+  
+  // モーダルを閉じる
+  hideRecordingConfirmModal()
+  
+  // 録音を開始
+  startRecording()
+}
 
 async function startRecording() {
   if (state.mediaRecorder || state.isProcessing) return
@@ -273,6 +328,11 @@ async function startRecording() {
       const timerContainer = document.getElementById('record-timer-container')
       if (timerContainer) timerContainer.classList.remove('hidden')
       
+      // Show warning banner
+      if (elements.recordingWarningBanner) {
+        elements.recordingWarningBanner.classList.remove('hidden')
+      }
+      
       elements.recordStart.disabled = true
       elements.recordStop.disabled = false
       elements.fileInput.disabled = true
@@ -280,6 +340,12 @@ async function startRecording() {
     state.mediaRecorder.onstop = async () => {
       stopTimer()
       stopWaveformDrawing()
+      
+      // Hide warning banner
+      if (elements.recordingWarningBanner) {
+        elements.recordingWarningBanner.classList.add('hidden')
+      }
+      
       const blob = new Blob(state.recordedChunks, { type: state.mediaRecorder?.mimeType || 'audio/webm' })
       if (blob.size === 0) {
         logStatus('録音データが空でした。再度お試しください。')

@@ -149,6 +149,76 @@
           <p class="text-gray-600 mb-2">ボタンを押すと音声認識が始まります</p>
         </div>
         
+        <!-- 録音前の確認モーダル（初回のみ） -->
+        <div id="recording-confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+          <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div class="flex items-center mb-4">
+              <div class="flex-shrink-0 w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center">
+                <svg class="w-6 h-6 text-yellow-600" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+                </svg>
+              </div>
+              <h3 class="ml-3 text-lg font-semibold text-gray-900">録音開始前の確認</h3>
+            </div>
+            <div class="mb-4 text-sm text-gray-700 space-y-3">
+              <p class="font-semibold text-gray-900">録音中は以下の点にご注意ください：</p>
+              <ul class="space-y-2">
+                <li class="flex items-start">
+                  <span class="mr-2">📡</span>
+                  <span><strong>インターネット接続を維持</strong>してください（Wi-Fi/モバイル通信を切断しないでください）</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="mr-2">💻</span>
+                  <span><strong>このタブを開いたまま</strong>にしてください（閉じると録音が停止します）</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="mr-2">📱</span>
+                  <span><strong>電話の着信に注意</strong>してください（着信で録音が中断される可能性があります）</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="mr-2">🔋</span>
+                  <span><strong>バッテリー残量を確認</strong>してください（長時間録音時は充電を推奨）</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="mr-2">🔇</span>
+                  <span><strong>マイクを塞がない</strong>でください</span>
+                </li>
+              </ul>
+            </div>
+            <div class="mb-4">
+              <label class="flex items-center text-sm text-gray-600 cursor-pointer">
+                <input type="checkbox" id="recording-confirm-checkbox" class="mr-2">
+                <span>次回から表示しない</span>
+              </label>
+            </div>
+            <div class="flex space-x-3">
+              <button id="recording-confirm-cancel" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium">
+                キャンセル
+              </button>
+              <button id="recording-confirm-start" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium">
+                理解しました
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 録音中の注意バナー（常時表示） -->
+        <div id="recording-warning-banner" class="hidden mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg shadow-sm">
+          <div class="flex items-start">
+            <div class="flex-shrink-0">
+              <svg class="w-5 h-5 text-yellow-600" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+              </svg>
+            </div>
+            <div class="ml-3 flex-1">
+              <p class="text-sm font-semibold text-yellow-800 mb-1">⚠️ 録音中の注意事項</p>
+              <p class="text-xs text-yellow-700">
+                📡 ネット接続維持　💻 タブを閉じない　📱 電話に注意　🔋 バッテリー確認
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- 録音ボタン -->
         <div class="flex justify-center mb-8">
           <button id="record-start" class="record-button">
@@ -613,6 +683,6 @@
     <audio id="audio-player" class="hidden"></audio>
     <canvas id="waveform-canvas" class="hidden"></canvas>
     
-    <script type="module" src="/static/app.js?v=20260204051500"></script>
+    <script type="module" src="/static/app.js?v=20260204052000"></script>
   </body>
 </html>
