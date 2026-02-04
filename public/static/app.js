@@ -632,19 +632,24 @@ async function processAudioFile(file) {
     // Upload all chunks as fast as possible (server will throttle processing)
     const uploadConcurrency = Math.max(1, Math.min(getConfig().uploadConcurrency || 5, 5)) // Max 5 concurrent uploads
     logStatus(`並列アップロード数: ${uploadConcurrency} (ブラウザ→サーバー、Gemini処理は2並列)`)
+    console.log('[Upload] Starting chunk upload:', plan.chunks.length, 'chunks')
     
     // Process chunks in strict batches for upload
     for (let i = 0; i < plan.chunks.length; i += uploadConcurrency) {
       const batch = plan.chunks.slice(i, i + uploadConcurrency)
       const batchNum = Math.floor(i / uploadConcurrency) + 1
       logStatus(`バッチ ${batchNum}: ${batch.length}チャンクを送信中...`)
+      console.log(`[Upload] Batch ${batchNum}: Uploading chunks ${i} to ${i + batch.length - 1}`)
       
       // Upload batch in parallel (but limited to uploadConcurrency)
       await Promise.all(batch.map(async (chunk) => {
+        console.log(`[Upload] Uploading chunk ${chunk.index}`)
         await uploadChunk(state.taskId, chunk)
+        console.log(`[Upload] Chunk ${chunk.index} uploaded successfully`)
       }))
       
       logStatus(`バッチ ${batchNum} 送信完了: ${Math.min(i + uploadConcurrency, plan.chunks.length)}/${plan.chunks.length} チャンク送信済み`)
+      console.log(`[Upload] Batch ${batchNum} completed`)
       
       // Update status after each batch
       const status = await fetchTaskStatus(state.taskId)
@@ -653,6 +658,7 @@ async function processAudioFile(file) {
       }
     }
 
+    console.log('[Upload] All chunks uploaded successfully')
     logStatus('全チャンクの送信が完了しました。サーバーで結合準備を確認します。')
     await fetchTaskLogs(state.taskId)
 
