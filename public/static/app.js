@@ -1729,7 +1729,7 @@ function showPage(pageName) {
   if (pageName === 'history') {
     loadMeetingHistory()
   } else if (pageName === 'admin') {
-    loadAdminErrors()
+    loadUsageStats()
   } else if (pageName === 'progress') {
     updateProgressPage()
   }
@@ -2544,16 +2544,4 @@ async function loadDailyStatsChart() {
 const refreshStatsBtn = document.getElementById('refresh-stats')
 if (refreshStatsBtn) {
   refreshStatsBtn.addEventListener('click', loadUsageStats)
-}
-
-// Load stats when admin page is shown
-const originalShowPage = window.showPage
-window.showPage = function(pageId) {
-  if (typeof originalShowPage === 'function') {
-    originalShowPage(pageId)
-  }
-  
-  if (pageId === 'admin') {
-    loadUsageStats()
-  }
 }
