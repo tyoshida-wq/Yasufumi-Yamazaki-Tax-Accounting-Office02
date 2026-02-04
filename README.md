@@ -48,12 +48,21 @@ Cloudflare Pages + Workers (Hono)
 - `transcripts` - 結合済み全文
 - `minutes` - 生成済み議事録
 - `task_logs` - タスク処理ログ
+- `usage_stats` - アプリ使用統計（累積、タスク削除後も保持）
+- `daily_usage_stats` - 日別使用統計（過去30日のトレンド分析）
+
+**統計機能:**
+- D1トリガーによる自動統計収集（タスク作成、チャンク完了、議事録生成時）
+- 累積データの保持（タスク削除後も統計は維持）
+- Gemini 2.5 Flash 料金に基づくAPIコスト推定
+- Chart.jsによる30日間の使用トレンドグラフ表示
 
 **メリット:**
 - SQLクエリによる高速検索
 - リレーショナルデータの整合性
 - 複雑なフィルタリング・ソート
 - データエクスポートの容易さ
+- リアルタイム統計更新（トリガーベース）
 
 ## API エンドポイント一覧
 | メソッド | パス | 用途 |
@@ -73,6 +82,9 @@ Cloudflare Pages + Workers (Hono)
 | `DELETE` | `/api/tasks/:taskId` | タスクとすべての関連データを削除 |
 | `GET` | `/api/config` | クライアント設定（チャンクサイズ・並列数など）を取得 |
 | `GET` | `/api/healthz` | 簡易ヘルスチェック |
+| `GET` | `/api/stats/usage` | 詳細な使用統計を取得（全期間累積） |
+| `GET` | `/api/stats/daily` | 日別使用統計を取得（デフォルト30日、最大365日） |
+| `GET` | `/api/stats/summary` | 管理ページ用のサマリー統計（計算済み）|
 
 ### タスク状態管理
 - `TASKS_KV` に `task:${id}`, `task:${id}:job:${index}`, `task:${id}:chunk:${index}`, `task:${id}:chunk-state:${index}`, `task:${id}:transcript`, `task:${id}:minutes` を保存。
@@ -83,9 +95,16 @@ Cloudflare Pages + Workers (Hono)
 ## デプロイ状況
 - **本番URL (Workers)**: https://yasufumi-yamazaki-tax-accounting-office02.t-yoshida.workers.dev
 - **本番URL (Pages)**: https://yasufumi-yamazaki-tax-accounting-office02.pages.dev
-- **最新デプロイ**: `6f82699` / `f4bc094a`（2026-02-04）
+- **最新デプロイ**: `c5451a8` / `b15b1d83`（2026-02-04）
 - **ステータス**: ✅ 稼働中
 - **最近の改善**: 
+  - **使用統計機能**: 管理ページにアプリ使用時間・APIコスト推定・30日トレンドグラフを表示
+    - D1トリガーによる自動統計収集（タスク作成、チャンク完了、議事録生成時）
+    - 累積データ保持（タスク削除後も統計維持）
+    - Gemini 2.5 Flash 料金表に基づくAPIコスト推定（音声$1.00、テキスト$0.30、出力$2.50 / 100万トークン）
+    - Chart.jsによる過去30日の使用トレンドグラフ
+    - 基本統計: 総タスク数、総音声長、総チャンク数、総議事録数
+    - 詳細統計: 平均音声長、平均チャンク数、エラー率、ストレージ使用量
   - **録音前の確認モーダル**: 初回のみ表示、localStorage で設定保存
   - **録音中の警告バナー**: ネット接続・タブ・電話・バッテリー・マイクの注意表示
   - **ページ離脱警告**: beforeunload イベントで録音中のページ離脱を防止
