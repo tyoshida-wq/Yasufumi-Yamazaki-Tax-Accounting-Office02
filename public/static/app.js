@@ -1515,10 +1515,18 @@ function stopWaveformDrawing() {
 
 // 音声レベルインジケーター
 function startAudioLevelIndicator() {
-  if (!state.analyser) return
+  if (!state.analyser) {
+    console.warn('[Audio Level] Analyser not available')
+    return
+  }
   
   const audioBars = document.querySelectorAll('.audio-bar')
-  if (audioBars.length === 0) return
+  if (audioBars.length === 0) {
+    console.warn('[Audio Level] No audio bars found')
+    return
+  }
+  
+  console.log('[Audio Level] Starting indicator with', audioBars.length, 'bars')
   
   const bufferLength = state.analyser.frequencyBinCount
   const dataArray = new Uint8Array(bufferLength)
@@ -1528,18 +1536,19 @@ function startAudioLevelIndicator() {
     
     state.indicatorAnimationId = requestAnimationFrame(updateIndicator)
     
-    // 音声データを取得
-    state.analyser.getByteFrequencyData(dataArray)
+    // 音声データを取得（時間領域データを使用）
+    state.analyser.getByteTimeDomainData(dataArray)
     
-    // 平均音量を計算
+    // RMS（二乗平均平方根）を計算して音量を測定
     let sum = 0
     for (let i = 0; i < bufferLength; i++) {
-      sum += dataArray[i]
+      const normalized = (dataArray[i] - 128) / 128 // -1 to 1
+      sum += normalized * normalized
     }
-    const average = sum / bufferLength
+    const rms = Math.sqrt(sum / bufferLength)
     
-    // 音量を0-1の範囲に正規化
-    const normalizedLevel = average / 255
+    // 音量を0-1の範囲に正規化（増幅して見やすくする）
+    const normalizedLevel = Math.min(1, rms * 3)
     
     // 各バーの高さを音量レベルに応じて調整
     audioBars.forEach((bar, index) => {
@@ -1547,6 +1556,10 @@ function startAudioLevelIndicator() {
       const barThreshold = barIndex / (audioBars.length / 2)
       
       if (normalizedLevel > barThreshold) {
+        // 音量に応じて高さを調整（最大48px）
+        const barHeight = Math.max(4, normalizedLevel * 48)
+        bar.style.height = `${barHeight}px`
+        
         // 音量に応じて色を変更（緑→黄→赤）
         if (normalizedLevel < 0.5) {
           bar.style.backgroundColor = '#10b981' // 緑
@@ -1557,6 +1570,7 @@ function startAudioLevelIndicator() {
         }
         bar.style.opacity = '1'
       } else {
+        bar.style.height = '4px'
         bar.style.backgroundColor = '#d1d5db' // グレー
         bar.style.opacity = '0.3'
       }
