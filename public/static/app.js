@@ -504,7 +504,7 @@ function updateTimerDisplay(ms) {
 function setSelectedFile(file, source) {
   state.selectedFile = file
   state.selectedSource = source
-  elements.startProcessing.disabled = false
+  if (elements.startProcessing) elements.startProcessing.disabled = false
   elements.chunkInfo.textContent = getChunkInfoText()
   const summaryLines = [
     `ソース: ${source}`,
@@ -538,7 +538,7 @@ async function processAudioFile(file) {
   state.autoReprocessInProgress = false
   updateResultPanels()
   toggleResultButtons(false)
-  elements.startProcessing.disabled = true
+  if (elements.startProcessing) elements.startProcessing.disabled = true
   stopStatusPolling()
   resetQueueActions()
   state.taskId = null
@@ -658,7 +658,7 @@ async function processAudioFile(file) {
     }
   } finally {
     state.isProcessing = false
-    elements.startProcessing.disabled = false
+    if (elements.startProcessing) elements.startProcessing.disabled = false
   }
 }
 
@@ -1521,7 +1521,7 @@ function clearAudioPlayer() {
   state.selectedFile = null
   state.selectedSource = null
   elements.fileSummary.textContent = '音声ファイルが未選択です。'
-  elements.startProcessing.disabled = true
+  if (elements.startProcessing) elements.startProcessing.disabled = true
   
   logStatus('録音データを削除しました。')
 }
@@ -2360,8 +2360,8 @@ async function showMinutesDetailModal(taskId) {
               
               // Show file summary
               elements.fileSummary.textContent = `選択: ${audioFile.name} (${(audioFile.size / 1024 / 1024).toFixed(2)} MB)`
-              elements.startProcessing.disabled = false
-              elements.startProcessing.classList.remove('opacity-50', 'cursor-not-allowed')
+              if (elements.startProcessing) elements.startProcessing.disabled = false
+              if (elements.startProcessing) elements.startProcessing.classList.remove('opacity-50', 'cursor-not-allowed')
               
               // Auto-start processing
               if (confirm('元の音声ファイルを取得しました。\n再処理を開始しますか？')) {
