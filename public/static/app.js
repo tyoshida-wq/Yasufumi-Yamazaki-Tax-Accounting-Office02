@@ -263,6 +263,16 @@ async function startRecording() {
       logStatus('録音を開始しました。最大3時間まで記録できます。')
       elements.recordStatus.textContent = '録音中...'
       elements.recordStatus.classList.add('text-emerald-600')
+      
+      // Hide start button, show stop button
+      elements.recordStart.style.display = 'none'
+      const stopContainer = document.getElementById('record-stop-container')
+      if (stopContainer) stopContainer.classList.remove('hidden')
+      
+      // Show timer container
+      const timerContainer = document.getElementById('record-timer-container')
+      if (timerContainer) timerContainer.classList.remove('hidden')
+      
       elements.recordStart.disabled = true
       elements.recordStop.disabled = false
       elements.fileInput.disabled = true
@@ -306,6 +316,16 @@ function resetRecordingControls() {
   elements.fileInput.disabled = false
   elements.recordStatus.textContent = 'マイクは未使用です'
   elements.recordStatus.classList.remove('text-emerald-600')
+  
+  // Show start button, hide stop button
+  elements.recordStart.style.display = ''
+  const stopContainer = document.getElementById('record-stop-container')
+  if (stopContainer) stopContainer.classList.add('hidden')
+  
+  // Hide timer container
+  const timerContainer = document.getElementById('record-timer-container')
+  if (timerContainer) timerContainer.classList.add('hidden')
+  
   state.mediaRecorder = null
   state.mediaStream = null
   state.audioContext = null
