@@ -550,9 +550,9 @@ async function processAudioFile(file) {
   if (progressPanel) progressPanel.classList.remove('hidden')
   if (logsPanel) logsPanel.classList.remove('hidden')
   
-  // 進捗ページに自動遷移
-  window.location.hash = 'progress'
-  showPage('progress')
+  // 履歴ページに自動遷移
+  window.location.hash = 'history'
+  showPage('history')
   
   logStatus('音声メタデータを読み込み中...')
 
@@ -579,6 +579,16 @@ async function processAudioFile(file) {
     state.taskId = task.id
     state.latestStatus = null
     logStatus(`タスク ${state.taskId} を作成しました。`)
+    
+    // 履歴ページの定期更新を開始（5秒ごと）
+    const historyUpdateInterval = setInterval(() => {
+      if (window.location.hash === '#history') {
+        loadMeetingHistory()
+      }
+    }, 5000)
+    
+    // 処理完了時にインターバルをクリア
+    window.historyUpdateInterval = historyUpdateInterval
     
     // Upload original audio file to R2 for playback
     try {
@@ -659,6 +669,17 @@ async function processAudioFile(file) {
   } finally {
     state.isProcessing = false
     if (elements.startProcessing) elements.startProcessing.disabled = false
+    
+    // 履歴の定期更新を停止
+    if (window.historyUpdateInterval) {
+      clearInterval(window.historyUpdateInterval)
+      window.historyUpdateInterval = null
+    }
+    
+    // 最後に履歴を1回更新
+    if (window.location.hash === '#history') {
+      loadMeetingHistory()
+    }
   }
 }
 
