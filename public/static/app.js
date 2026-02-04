@@ -2420,14 +2420,16 @@ function convertMarkdownToHTML(markdown) {
 let usageChart = null
 
 async function loadUsageStats() {
+  console.log('[Stats] Loading usage statistics...')
   try {
     const response = await fetch('/api/stats/summary')
     if (!response.ok) {
-      console.error('Failed to load stats:', response.statusText)
+      console.error('[Stats] Failed to load stats:', response.statusText)
       return
     }
     
     const data = await response.json()
+    console.log('[Stats] Data loaded:', data)
     
     // Update summary cards
     document.getElementById('stat-total-tasks').textContent = data.summary.total_tasks.toLocaleString()
@@ -2449,23 +2451,30 @@ async function loadUsageStats() {
     document.getElementById('stat-total-chars').textContent = data.summary.total_chunks.toLocaleString()
     document.getElementById('stat-last-30-days').textContent = data.last_30_days.tasks_count.toLocaleString() + ' 件'
     
+    console.log('[Stats] DOM updated successfully')
+    
     // Load and render chart
     await loadDailyStatsChart()
   } catch (error) {
-    console.error('Error loading usage stats:', error)
+    console.error('[Stats] Error loading usage stats:', error)
   }
 }
 
 async function loadDailyStatsChart() {
+  console.log('[Chart] Loading daily stats chart...')
+  console.log('[Chart] Chart.js available:', typeof Chart !== 'undefined')
+  
   try {
     const response = await fetch('/api/stats/daily?days=30')
     if (!response.ok) {
-      console.error('Failed to load daily stats:', response.statusText)
+      console.error('[Chart] Failed to load daily stats:', response.statusText)
       return
     }
     
     const data = await response.json()
     const stats = data.stats.reverse()  // Oldest to newest
+    
+    console.log('[Chart] Daily stats loaded:', stats.length, 'days')
     
     // Prepare chart data
     const labels = stats.map(s => {
@@ -2478,12 +2487,17 @@ async function loadDailyStatsChart() {
     // Destroy existing chart if any
     if (usageChart) {
       usageChart.destroy()
+      console.log('[Chart] Destroyed existing chart')
     }
     
     // Create new chart
     const ctx = document.getElementById('usage-chart')
-    if (!ctx) return
+    if (!ctx) {
+      console.error('[Chart] Canvas element not found')
+      return
+    }
     
+    console.log('[Chart] Creating new chart...')
     usageChart = new Chart(ctx, {
       type: 'line',
       data: {
@@ -2535,8 +2549,9 @@ async function loadDailyStatsChart() {
         }
       }
     })
+    console.log('[Chart] Chart created successfully')
   } catch (error) {
-    console.error('Error loading daily stats chart:', error)
+    console.error('[Chart] Error loading daily stats chart:', error)
   }
 }
 
